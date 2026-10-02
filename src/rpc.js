@@ -13,6 +13,7 @@ export class Rpc {
     this.interval = interval;
     this.nextCall = 0;
     this.id = 0;
+    this.controller = new AbortController();
   }
   async batch(requests) {
     if (!requests.length) return [];
@@ -20,14 +21,14 @@ export class Rpc {
       if (!METHODS.has(method)) throw new Error('RPC method is not read-only');
       return { jsonrpc: '2.0', id: ++this.id, method, params };
     });
-    await delay(Math.max(0, this.nextCall - Date.now()));
+    await delay(Math.max(0, this.nextCall - Date.now()), undefined, { signal: this.controller.signal });
     this.nextCall = Date.now() + this.interval;
     let response;
     try {
       response = await fetch(this.url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload.length === 1 ? payload[0] : payload),
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.any([AbortSignal.timeout(20000), this.controller.signal]),
       });
     } catch { throw new Error('Helius RPC unavailable or timed out'); }
     // Never surface endpoint URLs or provider error bodies, which can contain credentials.
@@ -44,4 +45,5 @@ export class Rpc {
     });
   }
   async call(method, params = []) { return (await this.batch([{ method, params }]))[0]; }
+  close() { this.controller.abort(); }
 }
