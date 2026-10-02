@@ -1,0 +1,16 @@
+{
+  "name": "wxmr-explorer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A small terminal and web explorer for finalized wXMR bridge activity",
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/cli.js",
+    "web": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/cli.js web",
+    "sync": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/cli.js sync",
+    "events": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/cli.js events",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "dependencies": { "bs58": "6.0.0" }
+}
