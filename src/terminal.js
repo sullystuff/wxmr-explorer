@@ -1,10 +1,19 @@
 import { emitKeypressEvents } from 'node:readline';
-import { TYPES } from './config.js';
+import { TYPES, formatAmount } from './config.js';
 
 const short = (s, width) => s.length <= width ? s : `${s.slice(0, width - 5)}…${s.slice(-4)}`;
 const pad = (s, width) => short(String(s), width).padEnd(width);
 const time = value => value === null ? 'Unknown' : new Date(value * 1000).toISOString().slice(5, 19).replace('T', ' ');
 const color = (code, value) => `\x1b[${code}m${value}\x1b[0m`;
+function fitLine(line, width) {
+  let visible = 0, result = '';
+  for (const part of line.match(/\x1b\[[\d;]*m|[^\x1b]/gu) || []) {
+    if (part.startsWith('\x1b')) result += part;
+    else if (visible < width - 1) { result += part; visible++; }
+    else return `${result}…\x1b[0m`;
+  }
+  return result;
+}
 
 export function printEvents(events, output = process.stdout) {
   for (const event of events) {
@@ -38,17 +47,18 @@ export function terminal(store, options, stop, following = false) {
       color('1;38;5;208', 'wXMR / bridge explorer') + color('90', `  mainnet · finalized${following ? ' · following local indexer' : ''}`),
       color('90', 'Deposit volumes = minted wXMR · withdrawal volumes = net XMR requested'),
       '',
-      color('1', `${pad('VOLUME', 15)}${pad('DEPOSITS', 23)}${pad('WITHDRAWALS', 23)}NET FLOW`),
-      ...store.stats().map(window => `${pad(window.label, 15)}${pad(`${window.deposited} (${window.deposits})`, 23)}${pad(`${window.withdrawn} (${window.withdrawals})`, 23)}${window.netFlow}`),
+      color('1', `${pad('VOLUME', 12)}${pad('DEPOSITS (wXMR)', 23)}${pad('WITHDRAWALS (XMR)', 23)}NET (XMR)`),
+      ...store.stats().map(window => `${pad(window.label, 12)}${pad(window.deposited, 23)}${pad(window.withdrawn, 23)}${window.netFlow}`),
       '',
       `Addresses created: ${status.counts.create}  ·  Mints: ${status.counts.mint}  ·  Requests: ${status.counts.withdraw}`,
     ];
     if (details && lastRows[selected]) {
       const event = lastRows[selected];
+      lines.splice(1);
       lines.push('', color('1', TYPES[event.type].label), `Time: ${time(event.blockTime)} UTC · slot ${event.slot}`,
         `Amount: ${event.amount === null ? '—' : `${event.amount} ${event.type === 'mint' ? 'wXMR' : 'XMR'}`}`,
         `Wallet: ${event.owner}`, `Record: ${event.pda}`, `Signature: ${event.signature}`, `Solscan: ${event.txUrl}`);
-      if (event.xmrAddress) lines.push(`XMR destination: ${event.xmrAddress}`, `Fee (atomic): ${event.feeAtomic}`);
+      if (event.xmrAddress) lines.push(`XMR destination: ${event.xmrAddress}`, `Fee: ${event.feeAtomic === null ? 'not reported by legacy event' : `${formatAmount(event.feeAtomic)} wXMR`}`);
       lines.push('', 'Esc / Enter: back to activity');
     } else {
       const small = width < 90;
@@ -66,8 +76,15 @@ export function terminal(store, options, stop, following = false) {
     const coverage = status.historyExhausted && !status.pending && !status.historyGap ? 'RPC history indexed' : 'History indexing; volumes cover indexed events';
     lines.push(color('90', `${coverage} · ${status.transactionsScanned} tx scanned · ${status.pending} queued${status.unresolved ? ` · ${status.unresolved} awaiting retry` : ''}`));
     lines.push(status.error ? color('31', status.error) : color('90', `Last sync: ${status.lastSync ? new Date(status.lastSync).toLocaleTimeString() : 'connecting…'}`));
-    lines.push(editing ? `Search: ${search}█  (Enter to apply / Esc to clear)` : color('90', '0 all · 1 create · 2 mint · 3 withdraw · / search · n/p page · ↑↓ select · Enter details · q quit'));
-    out.write(`\x1b[H\x1b[2J${lines.slice(0, out.rows || 40).join('\n')}`);
+    lines.push(editing ? `Search: ${search}█  (Enter to apply / Esc to clear)` : color('90', '0 all · 1 create · 2 mint · 3 withdraw · / find · n/p · ↑↓ · Enter · q'));
+    const rendered = details ? lines.flatMap(line => {
+      if (line.includes('\x1b')) return [fitLine(line, width)];
+      const chars = Array.from(line);
+      const wrapped = [];
+      do { wrapped.push(chars.splice(0, width - 1).join('')); } while (chars.length);
+      return wrapped;
+    }) : lines.map(line => fitLine(line, width));
+    out.write(`\x1b[H\x1b[2J${rendered.slice(0, out.rows || 40).join('\n')}`);
   }
 
   function onKey(str, key = {}) {

@@ -41,9 +41,26 @@ export function decodeEvent(bytes) {
   if (definition.type === 'withdraw') {
     data.nonce = reader.u64();
     data.amountAtomic = reader.u64();
-    data.feeAtomic = reader.u64();
+    // Historical layouts in bridge source: 1b90572 (no fee/exact_out),
+    // 5ab4e32 (exact_out), 11e955b onward (fee + exact_out).
+    const layout = [
+      { fee: true, exactOut: true }, { fee: false, exactOut: true }, { fee: false, exactOut: false },
+    ].find(candidate => {
+      const offset = reader.offset + (candidate.fee ? 8 : 0);
+      if (bytes.length < offset + 4) return false;
+      const length = bytes.readUInt32LE(offset);
+      if (bytes.length !== offset + 4 + length + (candidate.exactOut ? 1 : 0) + 8) return false;
+      if (!candidate.fee) {
+        // Prevent truncated modern data from masquerading as a legacy string.
+        const address = bytes.subarray(offset + 4, offset + 4 + length).toString('ascii');
+        return [95, 106].includes(length) && /^[1-9A-HJ-NP-Za-km-z]+$/.test(address);
+      }
+      return true;
+    });
+    if (!layout) throw new Error('Truncated or changed withdrawal event');
+    data.feeAtomic = layout.fee ? reader.u64() : null;
     data.xmrAddress = reader.string();
-    data.exactOut = reader.bool();
+    data.exactOut = layout.exactOut ? reader.bool() : null;
     data.timestamp = reader.i64();
   }
   if (reader.offset !== bytes.length) throw new Error('Bridge event schema changed');

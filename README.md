@@ -65,6 +65,8 @@ The explorer starts with the newest transactions and gradually backfills older h
 
 The indexer uses finalized signature history and finalized transactions, verifies the mainnet genesis hash and executable bridge program, and decodes events only from successful invocations of `EzBkC8P5wxab9kwrtV5hRdynHAfB5w3UPcPXNgMseVA8`, including CPI. Event-shaped logs from other programs and failed invocations are discarded. Unavailable or truncated transactions remain queued. SQLite transactions atomically persist events and mark their signatures processed; persisted cursors and queues survive restart.
 
+The decoder also supports the bridge's older withdrawal layouts from before `fee` and `exact_out` were added. Fields absent from historical events are `null`, not invented values.
+
 ## Configuration and credentials
 
 ```dotenv

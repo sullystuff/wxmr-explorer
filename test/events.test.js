@@ -25,6 +25,19 @@ test('preserves amounts above float precision and formats negative net flow exac
   assert.equal(formatAmount('-1'), '-0.000000000001');
   assert.equal(formatAmount('1000000000000'), '1');
 });
+test('decodes source-verified legacy withdrawal layouts without guessing missing fields', () => {
+  const common = [pda, owner, u64(7), u64('9007199254740993'), string('8'.repeat(95))];
+  const exact = decodeEvent(event('WithdrawRequestedEvent', [...common, Buffer.from([0]), i64(1700000000)]));
+  assert.equal(exact.amountAtomic, '9007199254740993');
+  assert.equal(exact.feeAtomic, null);
+  assert.equal(exact.exactOut, false);
+  const original = decodeEvent(event('WithdrawRequestedEvent', [...common, i64(1700000000)]));
+  assert.equal(original.feeAtomic, null);
+  assert.equal(original.exactOut, null);
+  assert.equal(original.timestamp, '1700000000');
+  const modern = event('WithdrawRequestedEvent', [pda, owner, u64(7), u64(1), u64(95), string('8'.repeat(95)), Buffer.from([0]), i64(1700000000)]);
+  assert.throws(() => decodeEvent(modern.subarray(0, -8)), /Truncated/);
+});
 test('verifies program provenance and successful CPI ancestry', () => {
   const other = '11111111111111111111111111111111';
   const data = logs(mint())[1];

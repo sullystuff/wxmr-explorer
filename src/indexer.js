@@ -93,7 +93,7 @@ export class Indexer {
       this.store.set('lastSync', new Date().toISOString());
       this.store.set('error', null);
     } catch (error) {
-      this.store.set('error', error.message);
+      if (!this.rpc.controller?.signal.aborted) this.store.set('error', error.message);
       throw error;
     }
   }
