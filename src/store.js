@@ -56,7 +56,7 @@ export class Store {
   }
   save(entry, events) {
     this.transaction(() => {
-      const insert = this.db.prepare('INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?,?,?,?)');
+      const insert = this.db.prepare('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING');
       for (const event of events) {
         insert.run(`${entry.signature}:${event.index}`, event.type, entry.signature, entry.slot, event.index,
           entry.block_time ?? null, event.owner, event.pda, event.amountAtomic ?? null, JSON.stringify(event));
@@ -97,7 +97,9 @@ export class Store {
     };
   }
   stats(now = Date.now()) {
-    if (this.statsCache && this.statsCache.minute === Math.floor(now / 60000)) return this.statsCache.value;
+    const interval = Math.floor(now / 5000);
+    const version = this.db.prepare('PRAGMA data_version').get().data_version;
+    if (this.statsCache && this.statsCache.interval === interval && this.statsCache.version === version) return this.statsCache.value;
     const windows = [
       ['8h', '8 hours', 8 * 3600], ['24h', '24 hours', 24 * 3600],
       ['7d', '7 days', 7 * 86400], ['all', 'All indexed', null],
@@ -120,7 +122,7 @@ export class Store {
       deposited: formatAmount(window.deposited), withdrawn: formatAmount(window.withdrawn),
       netFlow: formatAmount(window.deposited - window.withdrawn),
     }));
-    this.statsCache = { minute: Math.floor(now / 60000), value };
+    this.statsCache = { interval, version, value };
     return value;
   }
   close() { this.db.close(); }
