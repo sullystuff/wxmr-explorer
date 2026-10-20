@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { config, TYPES } from './config.js';
+import { config, ACTIVITY_TYPES } from './config.js';
 import { Store } from './store.js';
 import { Rpc } from './rpc.js';
 import { Indexer } from './indexer.js';
@@ -21,9 +21,9 @@ const help = `wXMR bridge explorer — terminal by default, no listening port
   npm run events -- --json           Cached activity as JSON
   npm start -- stats --json          Cached 8h / 24h / 7d / all volumes
 
-Types: create, mint, withdraw, refund (or all). Node.js 22.13+ required.
-Keyboard: 0/1/2/3/4 filters, / search, n/p pages, ↑↓ select, Enter details, q quit.
-Volumes: minted deposits, net requested withdrawals, and refunds; indexed history only.
+Types: create, mint, withdraw (or all). Node.js 22.13+ required.
+Keyboard: 0/1/2/3 filters, / search, n/p pages, ↑↓ select, Enter details, q quit.
+Volumes: minted deposits and net withdrawals; indexed history only.
 On-chain supply is read independently at finalized commitment.
 Helius URL goes in the ignored .env as SOLANA_RPC_URL.
 `;
@@ -38,7 +38,7 @@ async function main() {
   const command = positionals[0] || 'live';
   if (!['live', 'web', 'sync', 'events', 'stats'].includes(command) || positionals.length > 1) throw new Error('Unknown command; use --help');
   const type = values.type === 'all' ? '' : values.type || '';
-  if (type && !TYPES[type]) throw new Error('Type must be create, mint, withdraw, refund or all');
+  if (type && !ACTIVITY_TYPES.includes(type)) throw new Error('Type must be create, mint, withdraw or all');
   const limit = Number(values.limit);
   const passes = Number(values.passes);
   if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(passes) || passes < 1 || passes > 10000) throw new Error('Invalid limit or passes');
@@ -63,7 +63,7 @@ async function main() {
       if (values.json) console.log(JSON.stringify({ stats: store.stats(), status: store.status() }, null, 2));
       else {
         console.log(supplyLine(store.status()));
-        for (const window of store.stats()) console.log(`${window.label}: deposits ${window.deposited} wXMR · withdrawals ${window.withdrawn} XMR · refunds ${window.refunded} wXMR · indexed net flow ${window.netFlow} XMR`);
+        for (const window of store.stats()) console.log(`${window.label}: deposits ${window.deposited} wXMR · net withdrawals ${window.withdrawn} XMR · indexed net flow ${window.netFlow} XMR`);
       }
       return;
     }

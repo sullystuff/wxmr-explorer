@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { TYPES } from './config.js';
+import { ACTIVITY_TYPES } from './config.js';
 
 export function web(store, config) {
   const files = new Map([
@@ -22,7 +22,7 @@ export function web(store, config) {
       const type = url.searchParams.get('type') || '';
       const limit = Number(url.searchParams.get('limit') || 50);
       const offset = Number(url.searchParams.get('offset') || 0);
-      if ((type && !TYPES[type]) || !Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(offset) || offset < 0) {
+      if ((type && !ACTIVITY_TYPES.includes(type)) || !Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(offset) || offset < 0) {
         json(400, { error: 'Invalid event filter or page' }); return;
       }
       json(200, store.list({ type, limit, offset, search: (url.searchParams.get('search') || '').slice(0, 200) }));

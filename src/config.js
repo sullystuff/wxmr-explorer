@@ -10,6 +10,7 @@ export const TYPES = {
   withdraw: { event: 'WithdrawRequestedEvent', label: 'Withdraw request' },
   refund: { event: 'WithdrawRevertedEvent', label: 'Withdrawal refunded' },
 };
+export const ACTIVITY_TYPES = ['create', 'mint', 'withdraw'];
 
 export function config(env = process.env) {
   const integer = (key, fallback, min, max) => {

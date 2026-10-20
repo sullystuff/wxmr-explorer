@@ -151,8 +151,9 @@ test('upgrades an existing cache by replaying early deposits and withdrawal hist
     assert.equal(store.status().eventBackfillComplete, true);
     assert.equal(store.stats()[3].depositedAtomic, '1123');
     assert.equal(store.stats()[3].refundedAtomic, '500');
+    assert.equal(store.stats()[3].withdrawnAtomic, '0');
     assert.equal(store.stats()[3].netFlow, '0.000000001123');
-    assert.equal(store.list({ type: 'refund' }).total, 1);
+    assert.equal(store.list({ type: 'refund' }).total, 0);
     assert.equal(store.db.prepare('SELECT done FROM queue WHERE signature=?').get(audit.signature).done, 1);
     store.prepareEventBackfill();
     await indexer.backfillRefunds();

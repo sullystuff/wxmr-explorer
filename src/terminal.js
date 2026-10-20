@@ -49,16 +49,16 @@ export function terminal(store, options, stop, following = false) {
     const result = store.list({ type, search, limit: pageSize, offset: page * pageSize });
     lastRows = result.events;
     selected = Math.min(selected, Math.max(0, lastRows.length - 1));
-    const column = Math.max(15, Math.min(23, Math.floor((width - 13) / 4)));
+    const column = Math.max(15, Math.min(29, Math.floor((width - 13) / 3)));
     const lines = [
       color('1;38;5;208', 'wXMR / bridge explorer') + color('90', `  mainnet · finalized${following ? ' · following local indexer' : ''}`),
       color(!status.supply || status.supply.stale || status.supplyError ? '33' : '32', supplyLine(status)),
-      color('90', 'Indexed net flow = minted - requested + refunded; excludes burns outside the bridge'),
+      color('90', 'Indexed net flow = minted - net withdrawals; excludes burns outside the bridge'),
       '',
-      color('1', `${pad('VOLUME', 12)}${pad('MINTED (wXMR)', column)}${pad('REQUESTED (XMR)', column)}${pad('REFUNDED (wXMR)', column)}NET FLOW (XMR)`),
-      ...store.stats().map(window => `${pad(window.label, 12)}${pad(window.deposited, column)}${pad(window.withdrawn, column)}${pad(window.refunded, column)}${window.netFlow}`),
+      color('1', `${pad('VOLUME', 12)}${pad('MINTED (wXMR)', column)}${pad('NET OUT (XMR)', column)}NET FLOW (XMR)`),
+      ...store.stats().map(window => `${pad(window.label, 12)}${pad(window.deposited, column)}${pad(window.withdrawn, column)}${window.netFlow}`),
       '',
-      `Addresses created: ${status.counts.create}  ·  Mints: ${status.counts.mint}  ·  Requests: ${status.counts.withdraw}  ·  Refunds: ${status.counts.refund}`,
+      `Addresses created: ${status.counts.create}  ·  Mints: ${status.counts.mint}  ·  Requests: ${status.counts.withdraw}`,
     ];
     if (details && lastRows[selected]) {
       const event = lastRows[selected];
@@ -85,7 +85,7 @@ export function terminal(store, options, stop, following = false) {
     const coverage = status.historyExhausted && status.eventBackfillComplete && !status.pending && !status.historyGap ? 'RPC history indexed' : 'History indexing; volumes cover indexed events';
     lines.push(color('90', `${coverage} · ${status.transactionsScanned} tx scanned · ${status.pending} queued${status.unresolved ? ` · ${status.unresolved} awaiting retry` : ''}`));
     lines.push(status.error ? color('31', status.error) : color('90', `Last sync: ${status.lastSync ? new Date(status.lastSync).toLocaleTimeString() : 'connecting…'}`));
-    lines.push(editing ? `Search: ${search}█  (Enter to apply / Esc to clear)` : color('90', '0 all · 1 create · 2 mint · 3 withdraw · 4 refund · / find · n/p · ↑↓ · Enter · q'));
+    lines.push(editing ? `Search: ${search}█  (Enter to apply / Esc to clear)` : color('90', '0 all · 1 create · 2 mint · 3 withdraw · / find · n/p · ↑↓ · Enter · q'));
     const rendered = details ? lines.flatMap(line => {
       if (line.includes('\x1b')) return [fitLine(line, width)];
       const chars = Array.from(line);
@@ -109,7 +109,7 @@ export function terminal(store, options, stop, following = false) {
       if (str === 'q') stop();
     } else {
       if (str === 'q') { stop(); return; }
-      if ('01234'.includes(str) && str) { type = { 0: '', 1: 'create', 2: 'mint', 3: 'withdraw', 4: 'refund' }[str]; page = 0; }
+      if ('0123'.includes(str) && str) { type = { 0: '', 1: 'create', 2: 'mint', 3: 'withdraw' }[str]; page = 0; }
       if (str === '/') { editing = true; search = ''; }
       if (str === 'n' && (page + 1) * Math.max(1, (out.rows || 30) - 18) < store.list({ type, search, limit: 1 }).total) { page++; selected = 0; }
       if (str === 'p') { page = Math.max(0, page - 1); selected = 0; }

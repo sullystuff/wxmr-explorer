@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { PROGRAM_ID, GENESIS_HASH, EVENT_VERSION, formatAmount } from './config.js';
+import { PROGRAM_ID, GENESIS_HASH, EVENT_VERSION, ACTIVITY_TYPES, formatAmount } from './config.js';
 
 export class Store {
   constructor(path) {
@@ -86,8 +86,9 @@ export class Store {
     this.statsCache = null;
   }
   list({ type = '', search = '', limit = 50, offset = 0 } = {}) {
-    const clauses = [];
-    const params = [];
+    // Keep accounting-only events out of both activity rows and pagination totals.
+    const clauses = [`type IN (${ACTIVITY_TYPES.map(() => '?').join(',')})`];
+    const params = [...ACTIVITY_TYPES];
     if (type) { clauses.push('type=?'); params.push(type); }
     if (search) {
       clauses.push('(instr(owner,?)>0 OR instr(signature,?)>0 OR instr(pda,?)>0 OR instr(data,?)>0)');
@@ -143,9 +144,9 @@ export class Store {
     const value = windows.map(window => ({
       id: window.id, label: window.label, from: window.from,
       creates: window.creates, deposits: window.deposits, withdrawals: window.withdrawals, refunds: window.refunds,
-      depositedAtomic: window.deposited.toString(), withdrawnAtomic: window.withdrawn.toString(),
+      depositedAtomic: window.deposited.toString(), withdrawnAtomic: (window.withdrawn - window.refunded).toString(),
       refundedAtomic: window.refunded.toString(),
-      deposited: formatAmount(window.deposited), withdrawn: formatAmount(window.withdrawn), refunded: formatAmount(window.refunded),
+      deposited: formatAmount(window.deposited), withdrawn: formatAmount(window.withdrawn - window.refunded), refunded: formatAmount(window.refunded),
       netFlow: formatAmount(window.deposited - window.withdrawn + window.refunded),
     }));
     this.statsCache = { interval, version, value };

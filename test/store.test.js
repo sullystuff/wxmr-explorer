@@ -35,9 +35,13 @@ test('deduplicates transaction events, searches full values, and paginates', () 
     save(store, 'signature-one', 'mint', '1', 1, 1);
     save(store, 'signature-one', 'mint', '1', 1, 1);
     save(store, 'signature-two', 'withdraw', '2', 1, 2);
+    save(store, 'hidden-refund', 'refund', '2', 1, 3);
     assert.equal(store.list().total, 2);
     assert.equal(store.list({ type: 'mint', search: 'signature-one' }).total, 1);
     assert.equal(store.list({ search: 'record' }).total, 2);
+    assert.equal(store.list({ search: 'hidden-refund' }).total, 0);
+    assert.equal(store.list({ type: 'refund' }).total, 0);
+    assert.equal(store.list({ limit: 1 }).events[0].signature, 'signature-two');
     assert.equal(store.list({ limit: 1, offset: 1 }).events[0].signature, 'signature-one');
     assert.equal(store.stats(now)[0].deposits, 1);
   } finally { store.close(); }
@@ -51,14 +55,19 @@ test('refunds add back the burned net amount in the refund time window, without 
     save(store, 'refunded', 'refund', '9007199254740993', 60, 3);
     const windows = Object.fromEntries(store.stats(now).map(s => [s.id, s]));
     assert.equal(windows['8h'].depositedAtomic, '0');
-    assert.equal(windows['8h'].withdrawnAtomic, '0');
+    assert.equal(windows['8h'].withdrawnAtomic, '-9007199254740993');
+    assert.equal(windows['8h'].withdrawn, '-9007.199254740993');
     assert.equal(windows['8h'].refundedAtomic, '9007199254740993');
     assert.equal(windows['8h'].netFlow, '9007.199254740993');
     assert.equal(windows.all.netFlow, '9007.199254740993');
+    assert.equal(windows['24h'].withdrawnAtomic, '0');
+    assert.equal(windows.all.withdrawnAtomic, '0');
+    assert.equal(windows.all.withdrawn, '0');
     assert.equal(windows.all.refunds, 1);
     assert.equal(windows.all.deposits, 1);
     assert.equal(windows.all.withdrawals, 1);
     assert.equal(store.status().counts.refund, 1);
+    assert.equal(store.list().total, 2);
   } finally { store.close(); }
 });
 test('cached supply becomes stale after a failed read or an expired snapshot', () => {

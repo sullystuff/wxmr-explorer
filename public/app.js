@@ -1,4 +1,4 @@
-const labels = { create: 'Deposit address created', mint: 'Mint deposit', withdraw: 'Withdraw request', refund: 'Withdrawal refunded' };
+const labels = { create: 'Deposit address created', mint: 'Mint deposit', withdraw: 'Withdraw request' };
 let period = '24h';
 let type = '';
 let search = '';
@@ -33,7 +33,6 @@ function renderStats() {
   $('creates').textContent = integer(stats.creates);
   $('deposit-count').textContent = `${integer(stats.deposits)} mints · wXMR`;
   $('withdraw-count').textContent = `${integer(stats.withdrawals)} requests · XMR`;
-  $('refund-summary').textContent = `${stats.refunded} wXMR refunded in ${integer(stats.refunds)} reversals. Indexed net flow = minted − requested + refunded; burns outside the bridge can make it differ from supply.`;
   const supply = status.supply;
   $('supply').textContent = supply?.amount ?? '—';
   $('supply-status').textContent = supply ? `${supply.stale ? 'Stale · ' : ''}Finalized slot ${integer(supply.slot)} · checked ${new Date(supply.checkedAt).toLocaleTimeString()}` : 'Awaiting finalized RPC snapshot';
