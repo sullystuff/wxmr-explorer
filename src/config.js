@@ -1,11 +1,14 @@
 import { resolve } from 'node:path';
 
 export const PROGRAM_ID = 'EzBkC8P5wxab9kwrtV5hRdynHAfB5w3UPcPXNgMseVA8';
+export const MINT_ID = 'WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp';
 export const GENESIS_HASH = '5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d';
+export const EVENT_VERSION = 2;
 export const TYPES = {
   create: { event: 'DepositAccountCreatedEvent', label: 'Deposit address created' },
-  mint: { event: 'DepositMintedEvent', label: 'Mint deposit' },
+  mint: { event: 'DepositMintedEvent', aliases: ['DepositCompletedEvent'], label: 'Mint deposit' },
   withdraw: { event: 'WithdrawRequestedEvent', label: 'Withdraw request' },
+  refund: { event: 'WithdrawRevertedEvent', label: 'Withdrawal refunded' },
 };
 
 export function config(env = process.env) {

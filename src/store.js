@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { PROGRAM_ID, GENESIS_HASH, formatAmount } from './config.js';
+import { PROGRAM_ID, GENESIS_HASH, EVENT_VERSION, formatAmount } from './config.js';
 
 export class Store {
   constructor(path) {
@@ -51,6 +51,26 @@ export class Store {
     return this.db.prepare('SELECT * FROM queue WHERE done=0 AND retry_at<=? ORDER BY priority,slot DESC,ordinal ASC LIMIT ?').all(Date.now(), limit);
   }
   pendingCount() { return this.db.prepare('SELECT count(*) AS n FROM queue WHERE done=0').get().n; }
+  prepareEventBackfill() {
+    if (this.get('eventVersion') === EVENT_VERSION) return;
+    this.transaction(() => {
+      // CompleteDeposit predates DepositMintedEvent. Replay that small early
+      // section instead of downloading every historical audit transaction.
+      const firstMint = this.db.prepare("SELECT min(slot) AS slot FROM events WHERE type='mint'").get().slot;
+      this.db.prepare(`UPDATE queue SET done=0,retry_at=0,error=NULL
+        WHERE done=1 AND failed=0 AND (? IS NULL OR slot<?)`).run(firstMint, firstMint);
+      this.set('eventBackfill', { afterPda: '', exhausted: false });
+      this.set('eventVersion', EVENT_VERSION);
+    });
+  }
+  withdrawalRecords(afterPda, limit = 25) {
+    return this.db.prepare("SELECT DISTINCT pda FROM events WHERE type='withdraw' AND pda>? ORDER BY pda LIMIT ?")
+      .all(afterPda, limit).map(row => row.pda);
+  }
+  requeueKnown(entries) {
+    const update = this.db.prepare('UPDATE queue SET done=0,retry_at=0,error=NULL WHERE signature=? AND failed=0');
+    for (const entry of entries) update.run(entry.signature);
+  }
   defer(signature, error) {
     this.db.prepare('UPDATE queue SET retry_at=?,error=? WHERE signature=?').run(Date.now() + 60000, error, signature);
   }
@@ -84,8 +104,9 @@ export class Store {
     })) };
   }
   status() {
-    const counts = { create: 0, mint: 0, withdraw: 0 };
+    const counts = { create: 0, mint: 0, withdraw: 0, refund: 0 };
     for (const row of this.db.prepare('SELECT type,count(*) AS n FROM events GROUP BY type').all()) counts[row.type] = row.n;
+    const supply = this.get('supply');
     return {
       programId: PROGRAM_ID, network: 'mainnet-beta', commitment: 'finalized', counts,
       pending: this.pendingCount(),
@@ -93,6 +114,9 @@ export class Store {
       transactionsScanned: this.db.prepare('SELECT count(*) AS n FROM queue WHERE done=1').get().n,
       oldestIndexedTime: this.db.prepare('SELECT min(block_time) AS n FROM queue WHERE done=1').get().n,
       historyExhausted: this.get('backfill')?.exhausted ?? false,
+      eventBackfillComplete: this.get('eventVersion') === EVENT_VERSION && (this.get('eventBackfill')?.exhausted ?? false),
+      supply: supply ? { ...supply, stale: !!this.get('supplyError') || Date.now() - Date.parse(supply.checkedAt) > 60000 } : null,
+      supplyError: this.get('supplyError'),
       lastSync: this.get('lastSync'), error: this.get('error'), historyGap: this.get('historyGap'),
     };
   }
@@ -105,7 +129,7 @@ export class Store {
       ['7d', '7 days', 7 * 86400], ['all', 'All indexed', null],
     ].map(([id, label, seconds]) => ({
       id, label, from: seconds === null ? null : Math.floor(now / 1000) - seconds,
-      creates: 0, deposits: 0, withdrawals: 0, deposited: 0n, withdrawn: 0n,
+      creates: 0, deposits: 0, withdrawals: 0, refunds: 0, deposited: 0n, withdrawn: 0n, refunded: 0n,
     }));
     for (const row of this.db.prepare('SELECT type,amount_atomic,block_time FROM events').all()) {
       for (const window of windows) {
@@ -113,14 +137,16 @@ export class Store {
         if (row.type === 'create') window.creates++;
         if (row.type === 'mint') { window.deposits++; window.deposited += BigInt(row.amount_atomic); }
         if (row.type === 'withdraw') { window.withdrawals++; window.withdrawn += BigInt(row.amount_atomic); }
+        if (row.type === 'refund') { window.refunds++; window.refunded += BigInt(row.amount_atomic); }
       }
     }
     const value = windows.map(window => ({
       id: window.id, label: window.label, from: window.from,
-      creates: window.creates, deposits: window.deposits, withdrawals: window.withdrawals,
+      creates: window.creates, deposits: window.deposits, withdrawals: window.withdrawals, refunds: window.refunds,
       depositedAtomic: window.deposited.toString(), withdrawnAtomic: window.withdrawn.toString(),
-      deposited: formatAmount(window.deposited), withdrawn: formatAmount(window.withdrawn),
-      netFlow: formatAmount(window.deposited - window.withdrawn),
+      refundedAtomic: window.refunded.toString(),
+      deposited: formatAmount(window.deposited), withdrawn: formatAmount(window.withdrawn), refunded: formatAmount(window.refunded),
+      netFlow: formatAmount(window.deposited - window.withdrawn + window.refunded),
     }));
     this.statsCache = { interval, version, value };
     return value;

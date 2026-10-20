@@ -5,7 +5,7 @@ import { decodeEvent, decodeLogs } from '../src/events.js';
 import { formatAmount, PROGRAM_ID } from '../src/config.js';
 import { owner, pda, u64, i64, string, event, logs, mint } from './helpers.js';
 
-test('decodes only the three requested events and ignores address assignment', () => {
+test('decodes bridge activity and ignores address assignment', () => {
   const created = decodeEvent(event('DepositAccountCreatedEvent', [pda, owner, i64(1700000000)]));
   assert.equal(created.type, 'create');
   assert.equal(created.owner, bs58.encode(owner));
@@ -17,6 +17,28 @@ test('decodes only the three requested events and ignores address assignment', (
   assert.equal(withdrawal.feeAtomic, '100');
   assert.equal(withdrawal.xmrAddress, 'xmr-destination');
   assert.equal(withdrawal.exactOut, true);
+});
+test('decodes the original completed-deposit event without inventing a cumulative total', () => {
+  const legacy = decodeEvent(event('DepositCompletedEvent', [pda, owner, u64('1252938680000')]));
+  assert.equal(legacy.type, 'mint');
+  assert.equal(legacy.amountAtomic, '1252938680000');
+  assert.equal(legacy.totalDepositedAtomic, null);
+  assert.throws(() => decodeEvent(event('DepositCompletedEvent', [pda, owner, u64(1)]).subarray(0, -1)), /Truncated/);
+});
+test('decodes modern and original withdrawal refunds with exact amounts', () => {
+  const amount = '9007199254740993';
+  const modern = event('WithdrawRevertedEvent', [pda, owner, u64(amount), u64(10), string('Canceled by withdrawal owner')]);
+  const refund = decodeEvent(modern);
+  assert.equal(refund.type, 'refund');
+  assert.equal(refund.amountAtomic, amount);
+  assert.equal(refund.feeAtomic, '10');
+  assert.equal(refund.reason, 'Canceled by withdrawal owner');
+  const legacy = decodeEvent(event('WithdrawRevertedEvent', [pda, owner, u64(3), string('Legacy reversal')]));
+  assert.equal(legacy.feeAtomic, null);
+  assert.equal(legacy.reason, 'Legacy reversal');
+  assert.throws(() => decodeEvent(modern.subarray(0, -1)), /Truncated|schema changed/);
+  assert.equal(decodeLogs(logs(modern)).length, 1);
+  assert.deepEqual(decodeLogs([...logs(modern).slice(0, -1), `Program ${PROGRAM_ID} failed: custom error`]), []);
 });
 test('preserves amounts above float precision and formats negative net flow exactly', () => {
   assert.equal(decodeEvent(mint()).amountAtomic, '9007199254740993');

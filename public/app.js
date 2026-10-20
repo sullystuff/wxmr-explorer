@@ -1,4 +1,4 @@
-const labels = { create: 'Deposit address created', mint: 'Mint deposit', withdraw: 'Withdraw request' };
+const labels = { create: 'Deposit address created', mint: 'Mint deposit', withdraw: 'Withdraw request', refund: 'Withdrawal refunded' };
 let period = '24h';
 let type = '';
 let search = '';
@@ -33,6 +33,13 @@ function renderStats() {
   $('creates').textContent = integer(stats.creates);
   $('deposit-count').textContent = `${integer(stats.deposits)} mints · wXMR`;
   $('withdraw-count').textContent = `${integer(stats.withdrawals)} requests · XMR`;
+  $('refund-summary').textContent = `${stats.refunded} wXMR refunded in ${integer(stats.refunds)} reversals. Indexed net flow = minted − requested + refunded; burns outside the bridge can make it differ from supply.`;
+  const supply = status.supply;
+  $('supply').textContent = supply?.amount ?? '—';
+  $('supply-status').textContent = supply ? `${supply.stale ? 'Stale · ' : ''}Finalized slot ${integer(supply.slot)} · checked ${new Date(supply.checkedAt).toLocaleTimeString()}` : 'Awaiting finalized RPC snapshot';
+  $('supply-status').classList.toggle('stale', !!supply?.stale || !!status.supplyError);
+  $('supply-error').textContent = status.supplyError || '';
+  $('supply-error').hidden = !status.supplyError;
   for (const button of $('windows').querySelectorAll('button')) {
     button.classList.toggle('active', button.dataset.window === period);
     button.setAttribute('aria-pressed', String(button.dataset.window === period));
@@ -47,7 +54,8 @@ function renderRows(result) {
     kind.append(link(`Record ${short(event.pda)} ↗`, `https://solscan.io/account/${event.pda}`, event.pda));
     kind.lastChild.className = 'sub';
     const amount = node('td', event.amount ?? '—', 'amount');
-    if (event.amount !== null) amount.append(node('span', event.type === 'mint' ? 'wXMR' : 'XMR', 'unit'));
+    if (event.amount !== null) amount.append(node('span', event.type === 'withdraw' ? 'XMR' : 'wXMR', 'unit'));
+    if (event.reason) amount.append(node('span', event.reason, 'sub'));
     const wallet = node('td', undefined, 'wallet');
     wallet.append(link(event.owner, `https://solscan.io/account/${event.owner}`));
     const date = event.blockTime === null ? null : new Date(event.blockTime * 1000);
@@ -84,7 +92,7 @@ async function refresh() {
     renderStats();
     renderRows(result);
     $('sync').textContent = status.lastSync ? `Synced ${new Date(status.lastSync).toLocaleTimeString()}` : 'Connecting to Helius…';
-    const complete = status.historyExhausted && status.pending === 0 && !status.historyGap;
+    const complete = status.historyExhausted && status.eventBackfillComplete && status.pending === 0 && !status.historyGap;
     $('coverage').textContent = `${complete ? 'RPC history indexed' : 'History indexing · totals cover indexed events'} · ${integer(status.transactionsScanned)} tx scanned${status.pending ? ` · ${integer(status.pending)} queued` : ''}${status.unresolved ? ` · ${integer(status.unresolved)} awaiting retry` : ''}`;
     $('error').textContent = status.error || '';
     $('error').hidden = !status.error;

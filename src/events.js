@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 import bs58 from 'bs58';
 import { PROGRAM_ID, TYPES } from './config.js';
 
-const definitions = Object.entries(TYPES).map(([type, definition]) => ({
-  type, ...definition,
-  discriminator: createHash('sha256').update(`event:${definition.event}`).digest().subarray(0, 8),
-}));
+const definitions = Object.entries(TYPES).flatMap(([type, definition]) =>
+  [definition.event, ...(definition.aliases || [])].map(name => ({
+    type, name,
+    discriminator: createHash('sha256').update(`event:${name}`).digest().subarray(0, 8),
+  })));
 
 class Reader {
   constructor(bytes) { this.bytes = bytes; this.offset = 8; }
@@ -29,14 +30,22 @@ class Reader {
 export function decodeEvent(bytes) {
   if (bytes.length < 8) throw new Error('Truncated bridge event');
   const definition = definitions.find(d => bytes.subarray(0, 8).equals(d.discriminator));
-  // Only the three requested events are decoded or persisted.
+  // Keep bridge activity and refund accounting; ignore operational events.
   if (!definition) return null;
   const reader = new Reader(bytes);
   const data = { pda: reader.key(), owner: reader.key() };
   if (definition.type === 'create') data.timestamp = reader.i64();
   if (definition.type === 'mint') {
     data.amountAtomic = reader.u64();
-    data.totalDepositedAtomic = reader.u64();
+    data.totalDepositedAtomic = definition.name === 'DepositCompletedEvent' ? null : reader.u64();
+  }
+  if (definition.type === 'refund') {
+    data.amountAtomic = reader.u64();
+    // The original event predates withdrawal fees.
+    const modern = bytes.length >= reader.offset + 12 &&
+      bytes.readUInt32LE(reader.offset + 8) === bytes.length - reader.offset - 12;
+    data.feeAtomic = modern ? reader.u64() : null;
+    data.reason = reader.string();
   }
   if (definition.type === 'withdraw') {
     data.nonce = reader.u64();

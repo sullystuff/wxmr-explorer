@@ -1,10 +1,11 @@
-import { PROGRAM_ID, GENESIS_HASH } from './config.js';
+import { PROGRAM_ID, MINT_ID, GENESIS_HASH, formatAmount } from './config.js';
 import { decodeLogs } from './events.js';
 
 export class Indexer {
   constructor(store, rpc, pollMs = 15000) {
     Object.assign(this, { store, rpc, pollMs });
     this.nextPoll = 0;
+    this.nextSupplyPoll = 0;
     this.verified = false;
   }
   async verify() {
@@ -13,12 +14,52 @@ export class Indexer {
     if (!account?.value?.executable) throw new Error('wXMR bridge program is unavailable');
     this.verified = true;
   }
-  async signatures(before) {
-    const result = await this.rpc.call('getSignaturesForAddress', [PROGRAM_ID, {
+  async signatures(before, address = PROGRAM_ID) {
+    const result = await this.rpc.call('getSignaturesForAddress', [address, {
       commitment: 'finalized', limit: 100, ...(before ? { before } : {}),
     }]);
     if (!Array.isArray(result)) throw new Error('Invalid signature history');
     return result;
+  }
+  async refreshSupply() {
+    const result = await this.rpc.call('getTokenSupply', [MINT_ID, { commitment: 'finalized' }]);
+    const amount = result?.value?.amount;
+    if (result?.value?.decimals !== 12 || typeof amount !== 'string' || !/^\d+$/.test(amount) ||
+      BigInt(amount) > 18446744073709551615n || !Number.isSafeInteger(result?.context?.slot) || result.context.slot < 1) {
+      throw new Error('Invalid finalized wXMR supply');
+    }
+    this.store.set('supply', {
+      mint: MINT_ID, amountAtomic: amount, amount: formatAmount(amount),
+      slot: result.context.slot, checkedAt: new Date().toISOString(),
+    });
+    this.store.set('supplyError', null);
+  }
+  async backfillRefunds() {
+    const cursor = this.store.get('eventBackfill');
+    if (!cursor || cursor.exhausted || this.store.pendingCount() >= 75) return;
+    const pdas = this.store.withdrawalRecords(cursor.afterPda);
+    if (!pdas.length) { this.store.set('eventBackfill', { ...cursor, exhausted: true }); return; }
+    const histories = await this.rpc.batch(pdas.map(pda => ({ method: 'getSignaturesForAddress', params: [pda, {
+      commitment: 'finalized', limit: 100,
+    }] })));
+    const entries = [];
+    for (const [i, history] of histories.entries()) {
+      if (!Array.isArray(history)) throw new Error('Invalid withdrawal signature history');
+      entries.push(...history);
+      let page = history;
+      while (page.length === 100) {
+        const before = page.at(-1).signature;
+        page = await this.signatures(before, pdas[i]);
+        if (page.at(-1)?.signature === before) throw new Error('Withdrawal history pagination stalled');
+        entries.push(...page);
+      }
+    }
+    this.store.transaction(() => {
+      // Only revisit transactions already discovered through the bridge program.
+      // Never clear existing events: their IDs deduplicate the replay.
+      this.store.requeueKnown(entries);
+      this.store.set('eventBackfill', { afterPda: pdas.at(-1), exhausted: pdas.length < 25 });
+    });
   }
   async recent() {
     const head = this.store.get('head');
@@ -84,12 +125,19 @@ export class Indexer {
   async tick() {
     try {
       if (!this.verified) await this.verify();
+      this.store.prepareEventBackfill();
+      if (Date.now() >= this.nextSupplyPoll) {
+        try { await this.refreshSupply(); }
+        catch (error) { this.store.set('supplyError', error.message); }
+        this.nextSupplyPoll = Date.now() + this.pollMs;
+      }
       if (Date.now() >= this.nextPoll || this.store.get('recentScan')) {
         await this.recent();
         this.nextPoll = Date.now() + this.pollMs;
       }
       await this.process();
       await this.backfill();
+      await this.backfillRefunds();
       this.store.set('lastSync', new Date().toISOString());
       this.store.set('error', null);
     } catch (error) {

@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
-const METHODS = new Set(['getGenesisHash', 'getAccountInfo', 'getSignaturesForAddress', 'getTransaction']);
+const METHODS = new Set(['getGenesisHash', 'getAccountInfo', 'getTokenSupply', 'getSignaturesForAddress', 'getTransaction']);
 
 export class Rpc {
   constructor(url, interval = 300) {

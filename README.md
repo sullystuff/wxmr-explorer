@@ -1,12 +1,13 @@
 # wXMR explorer
 
-A small read-only explorer for three finalized Solana bridge events:
+A small read-only explorer for finalized Solana bridge activity and the current wXMR supply:
 
 - **Deposit address created** — `DepositAccountCreatedEvent` (creation of the deposit account).
 - **Mint deposit** — `DepositMintedEvent`, with the minted amount.
 - **Withdraw request** — `WithdrawRequestedEvent`, with the net requested amount.
+- **Withdrawal refunded** — `WithdrawRevertedEvent`, including owner cancellations and authority reversals.
 
-Address assignments, claims, completions, fee updates, and other bridge activity do not appear in the feed. A withdrawal request is not proof of a completed XMR payment.
+The original `DepositCompletedEvent` is also included as a mint deposit. Address assignments, claims, withdrawal completions, fee updates, and operational audit traffic do not appear in the feed. A withdrawal request is not proof of a completed XMR payment.
 
 ## Terminal — default
 
@@ -19,11 +20,11 @@ cp .env.example .env
 npm start
 ```
 
-The terminal dashboard refreshes automatically and shows activity plus **8h, 24h, 7d, and all-indexed** volume, event counts, and net flow. Times in the activity table are UTC. Press Enter on a selected event for full addresses, amounts, and transaction links.
+The terminal dashboard refreshes automatically and shows the **current on-chain wXMR supply** separately from **8h, 24h, 7d, and all-indexed** volume, refunds, event counts, and indexed net flow. Times in the activity table are UTC. Press Enter on a selected event for full addresses, amounts, and transaction links.
 
 | Key | Action |
 | --- | --- |
-| `0`, `1`, `2`, `3` | All, deposit creation, mint, withdrawal |
+| `0`, `1`, `2`, `3`, `4` | All, deposit creation, mint, withdrawal, refund |
 | `/` | Search wallet, deposit/withdrawal record, XMR destination, or transaction |
 | `n`, `p` | Older/newer page |
 | `↑`, `↓`, Enter | Select an event and show its full details |
@@ -36,6 +37,7 @@ npm start -- --search SOLANA_WALLET
 npm start -- --json                  # Live JSONL; also works without a TTY.
 npm run events -- --limit 50         # Cached activity; makes no RPC calls.
 npm run events -- --type withdraw --json
+npm run events -- --type refund --json
 npm start -- stats --json            # Cached volumes and indexing status.
 npm run sync -- --passes 8           # Bounded sync, about 25 transactions per pass.
 ```
@@ -56,16 +58,20 @@ The terminal and web UI can run together: the first process indexes history, and
 
 All amounts use **12 decimal places** (1 XMR = 10¹² atomic units). Atomic amounts are strings; sums use BigInt rather than floating-point arithmetic.
 
-- Deposit volume is the wXMR minted by `DepositMintedEvent`.
-- Withdrawal volume is net XMR requested/burned, excluding the bridge fee. It does not measure completed payouts or subtract later reversals.
-- Net flow is minted deposit volume minus requested withdrawal volume, expressed in XMR units. It is not a reserve balance.
+- **On-chain supply** is read directly from the mainnet wXMR mint, `WXMRyRZhsa19ety5erZhHg4N3xj3EVN92u94422teJp`, using `getTokenSupply` at finalized commitment. It is independent of the volume window and indexed history. The snapshot includes its finalized slot and check time; a failed refresh or a snapshot older than 60 seconds is marked stale. Cached `stats` commands do not refresh it.
+- Deposit volume includes the wXMR minted by both `DepositMintedEvent` and the original `DepositCompletedEvent`.
+- Withdrawal volume is net XMR requested/burned, excluding the bridge fee. It measures requests, including those later reversed, rather than completed payouts.
+- Refund volume is the net wXMR re-minted by withdrawal reversals/cancellations. It is counted at the refund transaction's block time, even when the original request falls outside the selected window. The retained fee is not refunded.
+- **Indexed net flow = minted deposits − requested withdrawals + refunds**, expressed in XMR units. It is not a reserve balance or a substitute for on-chain supply: token burns outside the bridge and missing provider history can make them differ.
 - Time windows use transaction block times. Events without a known block time count only toward all-indexed totals.
 
 The explorer starts with the newest transactions and gradually backfills older history. Until backfill finishes, totals cover **indexed events only**. The views show scanned transactions, queued work, and unavailable/undecodable transactions awaiting retry. “RPC history indexed” means all history returned by this endpoint was processed; it cannot establish that the provider retained the bridge's entire lifetime. `sync` is a bounded pass, not a full-history completion guarantee.
 
+Existing caches upgrade automatically when an indexer starts. The upgrade reprocesses the early history before the first indexed mint and checks the indexed withdrawal PDAs for refund transactions. It retains all existing events and normal history cursors, resumes after interruption, and skips the bulk of unrelated audit traffic. Coverage remains incomplete until the upgrade and its queued work finish. Additional views follow the writer's cached supply and upgrade progress.
+
 The indexer uses finalized signature history and finalized transactions, verifies the mainnet genesis hash and executable bridge program, and decodes events only from successful invocations of `EzBkC8P5wxab9kwrtV5hRdynHAfB5w3UPcPXNgMseVA8`, including CPI. Event-shaped logs from other programs and failed invocations are discarded. Unavailable or truncated transactions remain queued. SQLite transactions atomically persist events and mark their signatures processed; persisted cursors and queues survive restart.
 
-The decoder also supports the bridge's older withdrawal layouts from before `fee` and `exact_out` were added. Fields absent from historical events are `null`, not invented values.
+The decoder also supports the bridge's older withdrawal/refund layouts from before `fee` and `exact_out` were added. Fields absent from historical events, including the cumulative total on original deposit completions, are `null`, not invented values.
 
 ## Configuration and credentials
 

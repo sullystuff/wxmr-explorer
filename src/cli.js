@@ -6,7 +6,7 @@ import { Store } from './store.js';
 import { Rpc } from './rpc.js';
 import { Indexer } from './indexer.js';
 import { acquireLock } from './lock.js';
-import { terminal, printEvents } from './terminal.js';
+import { terminal, printEvents, supplyLine } from './terminal.js';
 import { web } from './web.js';
 
 const help = `wXMR bridge explorer — terminal by default, no listening port
@@ -21,9 +21,10 @@ const help = `wXMR bridge explorer — terminal by default, no listening port
   npm run events -- --json           Cached activity as JSON
   npm start -- stats --json          Cached 8h / 24h / 7d / all volumes
 
-Types: create, mint, withdraw (or all). Node.js 22.13+ required.
-Keyboard: 0/1/2/3 filters, / search, n/p pages, ↑↓ select, Enter details, q quit.
-Volumes: minted deposits and net requested withdrawals; indexed history only.
+Types: create, mint, withdraw, refund (or all). Node.js 22.13+ required.
+Keyboard: 0/1/2/3/4 filters, / search, n/p pages, ↑↓ select, Enter details, q quit.
+Volumes: minted deposits, net requested withdrawals, and refunds; indexed history only.
+On-chain supply is read independently at finalized commitment.
 Helius URL goes in the ignored .env as SOLANA_RPC_URL.
 `;
 
@@ -37,7 +38,7 @@ async function main() {
   const command = positionals[0] || 'live';
   if (!['live', 'web', 'sync', 'events', 'stats'].includes(command) || positionals.length > 1) throw new Error('Unknown command; use --help');
   const type = values.type === 'all' ? '' : values.type || '';
-  if (type && !TYPES[type]) throw new Error('Type must be create, mint, withdraw or all');
+  if (type && !TYPES[type]) throw new Error('Type must be create, mint, withdraw, refund or all');
   const limit = Number(values.limit);
   const passes = Number(values.passes);
   if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(passes) || passes < 1 || passes > 10000) throw new Error('Invalid limit or passes');
@@ -60,7 +61,10 @@ async function main() {
     }
     if (command === 'stats') {
       if (values.json) console.log(JSON.stringify({ stats: store.stats(), status: store.status() }, null, 2));
-      else for (const window of store.stats()) console.log(`${window.label}: deposits ${window.deposited} wXMR · withdrawals ${window.withdrawn} XMR · net flow ${window.netFlow} XMR`);
+      else {
+        console.log(supplyLine(store.status()));
+        for (const window of store.stats()) console.log(`${window.label}: deposits ${window.deposited} wXMR · withdrawals ${window.withdrawn} XMR · refunds ${window.refunded} wXMR · indexed net flow ${window.netFlow} XMR`);
+      }
       return;
     }
     release = acquireLock(settings.dataDir);
