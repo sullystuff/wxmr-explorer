@@ -37,6 +37,7 @@ export function terminal(store, options, stop, following = false) {
   let details = false;
   let lastRows = [];
   const out = process.stdout;
+  const pageSize = () => Math.max(1, (out.rows || 30) - 23);
   out.write('\x1b[?1049h\x1b[?25l');
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -44,21 +45,25 @@ export function terminal(store, options, stop, following = false) {
 
   function render() {
     const width = Math.max(40, out.columns || 100);
-    const pageSize = Math.max(1, (out.rows || 30) - 18);
+    const limit = pageSize();
     const status = store.status();
-    const result = store.list({ type, search, limit: pageSize, offset: page * pageSize });
+    const stats = store.stats();
+    const result = store.list({ type, search, limit, offset: page * limit });
     lastRows = result.events;
     selected = Math.min(selected, Math.max(0, lastRows.length - 1));
     const column = Math.max(15, Math.min(29, Math.floor((width - 13) / 3)));
+    const countLabels = ['USERS', 'DEPOSITORS', 'WITHDRAWERS', 'ADDRESSES', 'MINTS', 'REQUESTS'];
     const lines = [
       color('1;38;5;208', 'wXMR / bridge explorer') + color('90', `  mainnet · finalized${following ? ' · following local indexer' : ''}`),
       color(!status.supply || status.supply.stale || status.supplyError ? '33' : '32', supplyLine(status)),
       color('90', 'Indexed net flow = minted - net withdrawals; excludes burns outside the bridge'),
       '',
       color('1', `${pad('VOLUME', 12)}${pad('MINTED (wXMR)', column)}${pad('NET OUT (XMR)', column)}NET FLOW (XMR)`),
-      ...store.stats().map(window => `${pad(window.label, 12)}${pad(window.deposited, column)}${pad(window.withdrawn, column)}${window.netFlow}`),
+      ...stats.map(window => `${pad(window.label, 12)}${pad(window.deposited, column)}${pad(window.withdrawn, column)}${window.netFlow}`),
+      color('90', 'Users, depositors, withdrawers = distinct Solana wallets per period'),
+      color('1', `${pad('ACTIVITY', 12)}${countLabels.map(label => pad(label, label.length + 2)).join('')}`),
+      ...stats.map(window => `${pad(window.label, 12)}${[window.uniqueUsers, window.uniqueDepositors, window.uniqueWithdrawers, window.creates, window.deposits, window.withdrawals].map((count, i) => pad(count, countLabels[i].length + 2)).join('')}`),
       '',
-      `Addresses created: ${status.counts.create}  ·  Mints: ${status.counts.mint}  ·  Requests: ${status.counts.withdraw}`,
     ];
     if (details && lastRows[selected]) {
       const event = lastRows[selected];
@@ -111,7 +116,7 @@ export function terminal(store, options, stop, following = false) {
       if (str === 'q') { stop(); return; }
       if ('0123'.includes(str) && str) { type = { 0: '', 1: 'create', 2: 'mint', 3: 'withdraw' }[str]; page = 0; }
       if (str === '/') { editing = true; search = ''; }
-      if (str === 'n' && (page + 1) * Math.max(1, (out.rows || 30) - 18) < store.list({ type, search, limit: 1 }).total) { page++; selected = 0; }
+      if (str === 'n' && (page + 1) * pageSize() < store.list({ type, search, limit: 1 }).total) { page++; selected = 0; }
       if (str === 'p') { page = Math.max(0, page - 1); selected = 0; }
       if (key.name === 'down') selected = Math.min(lastRows.length - 1, selected + 1);
       if (key.name === 'up') selected = Math.max(0, selected - 1);

@@ -19,7 +19,7 @@ cp .env.example .env
 npm start
 ```
 
-The terminal dashboard refreshes automatically and shows the **current on-chain wXMR supply** separately from **8h, 24h, 7d, and all-indexed** minted volume, net withdrawals, event counts, and indexed net flow. Times in the activity table are UTC. Press Enter on a selected event for full addresses, amounts, and transaction links.
+The terminal dashboard refreshes automatically and shows the **current on-chain wXMR supply** separately from **8h, 24h, 7d, and all-indexed** minted volume, net withdrawals, unique users/depositors/withdrawers, event counts, and indexed net flow. Times in the activity table are UTC. Press Enter on a selected event for full addresses, amounts, and transaction links.
 
 | Key | Action |
 | --- | --- |
@@ -36,7 +36,7 @@ npm start -- --search SOLANA_WALLET
 npm start -- --json                  # Live JSONL; also works without a TTY.
 npm run events -- --limit 50         # Cached activity; makes no RPC calls.
 npm run events -- --type withdraw --json
-npm start -- stats --json            # Cached volumes and indexing status.
+npm start -- stats --json            # Cached volumes, user counts, and indexing status.
 npm run sync -- --passes 8           # Bounded sync, about 25 transactions per pass.
 ```
 
@@ -48,7 +48,7 @@ When stdout is redirected, the default dashboard becomes a plain event stream. `
 npm run web
 ```
 
-Open **http://127.0.0.1:3100** for the same activity, filters, search, pagination, and volume periods. The web view refreshes every five seconds. No frontend build is necessary. `HOST` and `PORT` can be changed in `.env`.
+Open **http://127.0.0.1:3100** for the same activity, filters, search, pagination, and statistics periods, including unique wallet counts and total activity events. The web view refreshes every five seconds. No frontend build is necessary. `HOST` and `PORT` can be changed in `.env`.
 
 The terminal and web UI can run together: the first process indexes history, and additional views follow its local cache. If the writer exits, restart a view to resume indexing. Only the optional web command opens a listening port.
 
@@ -62,6 +62,7 @@ All amounts use **12 decimal places** (1 XMR = 10¹² atomic units). Atomic amou
 - Refunds adjust net withdrawal volume internally; there is no separate refund view or summary. The retained fee is not refunded.
 - **Indexed net flow = minted deposits − net withdrawals**, expressed in XMR units. It is not a reserve balance or a substitute for on-chain supply: token burns outside the bridge and missing provider history can make them differ.
 - Time windows use transaction block times. Events without a known block time count only toward all-indexed totals.
+- **Unique users** counts distinct Solana owner wallets with a deposit address creation, minted deposit, or withdrawal request in the period. **Unique depositors** and **unique withdrawers** count wallets with mints and withdrawal requests, respectively. Repeated events from the same wallet count once; a wallet can belong to both groups. Wallet counts do not identify individual people. Accounting-only refunds do not add users or activity events. **Activity events** is the number of address creations, mints, and withdrawal requests, rather than a count of distinct transactions. These counts use the same time windows and indexed-history coverage as volumes and are included in cached stats JSON and `/api/status`.
 
 The explorer starts with the newest transactions and gradually backfills older history. Until backfill finishes, totals cover **indexed events only**. The views show scanned transactions, queued work, and unavailable/undecodable transactions awaiting retry. “RPC history indexed” means all history returned by this endpoint was processed; it cannot establish that the provider retained the bridge's entire lifetime. `sync` is a bounded pass, not a full-history completion guarantee.
 

@@ -19,11 +19,12 @@ const help = `wXMR bridge explorer — terminal by default, no listening port
   npm run sync -- --passes 8         Bounded history sync (25 tx per pass)
   npm run events -- --limit 50       Print cached activity, no RPC calls
   npm run events -- --json           Cached activity as JSON
-  npm start -- stats --json          Cached 8h / 24h / 7d / all volumes
+  npm start -- stats --json          Cached 8h / 24h / 7d / all statistics
 
 Types: create, mint, withdraw (or all). Node.js 22.13+ required.
 Keyboard: 0/1/2/3 filters, / search, n/p pages, ↑↓ select, Enter details, q quit.
 Volumes: minted deposits and net withdrawals; indexed history only.
+Users: distinct Solana wallets creating addresses, minting, or requesting withdrawals.
 On-chain supply is read independently at finalized commitment.
 Helius URL goes in the ignored .env as SOLANA_RPC_URL.
 `;
@@ -63,7 +64,11 @@ async function main() {
       if (values.json) console.log(JSON.stringify({ stats: store.stats(), status: store.status() }, null, 2));
       else {
         console.log(supplyLine(store.status()));
-        for (const window of store.stats()) console.log(`${window.label}: deposits ${window.deposited} wXMR · net withdrawals ${window.withdrawn} XMR · indexed net flow ${window.netFlow} XMR`);
+        for (const window of store.stats()) {
+          console.log(`${window.label}: deposits ${window.deposited} wXMR · net withdrawals ${window.withdrawn} XMR · indexed net flow ${window.netFlow} XMR`);
+          console.log(`  Unique users: ${window.uniqueUsers} · depositors: ${window.uniqueDepositors} · withdrawers: ${window.uniqueWithdrawers} · activity events: ${window.activityEvents}`);
+          console.log(`  Addresses created: ${window.creates} · mints: ${window.deposits} · requests: ${window.withdrawals}`);
+        }
       }
       return;
     }
