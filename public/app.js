@@ -31,6 +31,10 @@ function renderStats() {
   $('withdrawn').textContent = stats.withdrawn;
   $('net-flow').textContent = stats.netFlow;
   $('creates').textContent = integer(stats.creates);
+  $('unique-users').textContent = integer(stats.uniqueUsers);
+  $('unique-depositors').textContent = integer(stats.uniqueDepositors);
+  $('unique-withdrawers').textContent = integer(stats.uniqueWithdrawers);
+  $('activity-events').textContent = integer(stats.activityEvents);
   $('deposit-count').textContent = `${integer(stats.deposits)} mints · wXMR`;
   $('withdraw-count').textContent = `${integer(stats.withdrawals)} requests · XMR`;
   const supply = status.supply;
