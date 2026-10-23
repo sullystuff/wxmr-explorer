@@ -131,19 +131,23 @@ export class Store {
     ].map(([id, label, seconds]) => ({
       id, label, from: seconds === null ? null : Math.floor(now / 1000) - seconds,
       creates: 0, deposits: 0, withdrawals: 0, refunds: 0, deposited: 0n, withdrawn: 0n, refunded: 0n,
+      users: new Set(), depositors: new Set(), withdrawers: new Set(),
     }));
-    for (const row of this.db.prepare('SELECT type,amount_atomic,block_time FROM events').all()) {
+    for (const row of this.db.prepare('SELECT type,owner,amount_atomic,block_time FROM events').all()) {
       for (const window of windows) {
         if (window.from !== null && (row.block_time === null || row.block_time < window.from || row.block_time > now / 1000)) continue;
+        if (ACTIVITY_TYPES.includes(row.type)) window.users.add(row.owner);
         if (row.type === 'create') window.creates++;
-        if (row.type === 'mint') { window.deposits++; window.deposited += BigInt(row.amount_atomic); }
-        if (row.type === 'withdraw') { window.withdrawals++; window.withdrawn += BigInt(row.amount_atomic); }
+        if (row.type === 'mint') { window.deposits++; window.depositors.add(row.owner); window.deposited += BigInt(row.amount_atomic); }
+        if (row.type === 'withdraw') { window.withdrawals++; window.withdrawers.add(row.owner); window.withdrawn += BigInt(row.amount_atomic); }
         if (row.type === 'refund') { window.refunds++; window.refunded += BigInt(row.amount_atomic); }
       }
     }
     const value = windows.map(window => ({
       id: window.id, label: window.label, from: window.from,
       creates: window.creates, deposits: window.deposits, withdrawals: window.withdrawals, refunds: window.refunds,
+      uniqueUsers: window.users.size, uniqueDepositors: window.depositors.size, uniqueWithdrawers: window.withdrawers.size,
+      activityEvents: window.creates + window.deposits + window.withdrawals,
       depositedAtomic: window.deposited.toString(), withdrawnAtomic: (window.withdrawn - window.refunded).toString(),
       refundedAtomic: window.refunded.toString(),
       deposited: formatAmount(window.deposited), withdrawn: formatAmount(window.withdrawn - window.refunded), refunded: formatAmount(window.refunded),

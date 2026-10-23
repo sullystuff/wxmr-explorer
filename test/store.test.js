@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { Store } from '../src/store.js';
 
 const now = 1700000000000;
-function save(store, signature, type, amountAtomic, secondsAgo, slot) {
-  const entry = { signature, slot, blockTime: now / 1000 - secondsAgo, err: null };
+function save(store, signature, type, amountAtomic, secondsAgo, slot, owner = 'wallet') {
+  const entry = { signature, slot, blockTime: secondsAgo === null ? null : now / 1000 - secondsAgo, err: null };
   store.enqueue([entry]);
-  store.save({ ...entry, block_time: entry.blockTime }, [{ index: 1, type, owner: 'wallet', pda: 'record', ...(amountAtomic ? { amountAtomic } : {}) }]);
+  store.save({ ...entry, block_time: entry.blockTime }, [{ index: 1, type, owner, pda: 'record', ...(amountAtomic ? { amountAtomic } : {}) }]);
 }
 test('volume windows have exact sums, exclude fees, and count creation separately', () => {
   const store = new Store(':memory:');
@@ -27,6 +27,71 @@ test('volume windows have exact sums, exclude fees, and count creation separatel
     assert.equal(windows.all.depositedAtomic, '9010199254740993');
     assert.equal(windows.all.deposits, 3);
     assert.equal(windows.all.withdrawals, 2);
+  } finally { store.close(); }
+});
+test('unique wallet counts deduplicate owners across events and allow overlapping roles', () => {
+  const store = new Store(':memory:');
+  try {
+    save(store, 'alice-create', 'create', null, 60, 1, 'alice');
+    save(store, 'alice-mint', 'mint', '1', 59, 2, 'alice');
+    save(store, 'alice-mint-again', 'mint', '2', 58, 3, 'alice');
+    save(store, 'alice-withdraw', 'withdraw', '1', 57, 4, 'alice');
+    save(store, 'bob-mint', 'mint', '1', 56, 5, 'bob');
+    save(store, 'carol-create', 'create', null, 55, 6, 'carol');
+    save(store, 'bob-withdraw', 'withdraw', '1', 54, 7, 'bob');
+    save(store, 'dave-withdraw', 'withdraw', '1', 53, 8, 'dave');
+    save(store, 'dave-withdraw', 'withdraw', '1', 53, 8, 'dave');
+    save(store, 'refund-only', 'refund', '1', 52, 9, 'refund-wallet');
+    for (const window of store.stats(now)) {
+      assert.equal(window.uniqueUsers, 4, window.id);
+      assert.equal(window.uniqueDepositors, 2, window.id);
+      assert.equal(window.uniqueWithdrawers, 3, window.id);
+      assert.equal(window.activityEvents, 8, window.id);
+      assert.equal(window.creates, 2, window.id);
+      assert.equal(window.deposits, 3, window.id);
+      assert.equal(window.withdrawals, 3, window.id);
+    }
+  } finally { store.close(); }
+});
+test('unique users follow period boundaries and count unknown times only in all-indexed totals', () => {
+  const store = new Store(':memory:');
+  try {
+    save(store, '8h-boundary', 'mint', '1', 8 * 3600, 1, '8h-wallet');
+    save(store, 'outside-8h', 'withdraw', '1', 8 * 3600 + 1, 2, 'day-withdrawer');
+    save(store, '24h-boundary', 'create', null, 24 * 3600, 3, 'day-creator');
+    save(store, 'outside-24h', 'mint', '1', 24 * 3600 + 1, 4, 'week-depositor');
+    save(store, '7d-boundary', 'withdraw', '1', 7 * 86400, 5, 'week-withdrawer');
+    save(store, 'outside-7d', 'create', null, 7 * 86400 + 1, 6, 'older-creator');
+    save(store, 'unknown-time', 'mint', '1', null, 7, 'unknown-depositor');
+    save(store, 'future-time', 'withdraw', '1', -1, 8, 'future-withdrawer');
+    save(store, 'refund-only', 'refund', '1', 60, 9, 'refund-wallet');
+    const expected = {
+      '8h': [1, 1, 0, 1], '24h': [3, 1, 1, 3], '7d': [5, 2, 2, 5], all: [8, 3, 3, 8],
+    };
+    for (const window of store.stats(now)) {
+      assert.deepEqual([window.uniqueUsers, window.uniqueDepositors, window.uniqueWithdrawers, window.activityEvents], expected[window.id], window.id);
+    }
+    // A cached count expires as the oldest included event leaves its period.
+    assert.equal(store.stats(now + 5000)[0].uniqueUsers, 1); // Future event is now in range.
+    assert.equal(store.stats(now + 5000)[0].uniqueDepositors, 0);
+    assert.equal(store.stats(now + 5000)[0].uniqueWithdrawers, 1);
+  } finally { store.close(); }
+});
+test('empty and accounting-only periods have zero users and activity events', () => {
+  const store = new Store(':memory:');
+  try {
+    const check = () => {
+      for (const window of store.stats(now)) {
+        assert.deepEqual([window.uniqueUsers, window.uniqueDepositors, window.uniqueWithdrawers, window.activityEvents], [0, 0, 0, 0], window.id);
+      }
+    };
+    check();
+    save(store, 'refund-only', 'refund', '1', 60, 1, 'refund-wallet');
+    check();
+    save(store, 'new-user', 'mint', '1', 60, 2, 'new-wallet');
+    assert.equal(store.stats(now)[0].uniqueUsers, 1);
+    assert.equal(store.stats(now)[0].uniqueDepositors, 1);
+    assert.equal(store.stats(now)[0].activityEvents, 1);
   } finally { store.close(); }
 });
 test('deduplicates transaction events, searches full values, and paginates', () => {
