@@ -19,7 +19,7 @@ cp .env.example .env
 npm start
 ```
 
-The terminal dashboard refreshes automatically and shows the **current on-chain wXMR supply** separately from **8h, 24h, 7d, and all-indexed** minted volume, net withdrawals, unique users/depositors/withdrawers, event counts, and indexed net flow. Times in the activity table are UTC. Press Enter on a selected event for full addresses, amounts, and transaction links.
+The terminal dashboard refreshes automatically and shows the **current on-chain wXMR supply** separately from **8h, 24h, 7d, and all-indexed** minted volume, net withdrawals, unique users/depositors/withdrawers, event counts, and indexed net flow. Times in the activity table are UTC, with relative ages such as `2h ago` alongside them. Press Enter on a selected event for full addresses, amounts, and transaction links.
 
 | Key | Action |
 | --- | --- |
@@ -48,7 +48,7 @@ When stdout is redirected, the default dashboard becomes a plain event stream. `
 npm run web
 ```
 
-Open **http://127.0.0.1:3100** for the same activity, filters, search, pagination, and statistics periods, including unique wallet counts and total activity events. The web view refreshes every five seconds. No frontend build is necessary. `HOST` and `PORT` can be changed in `.env`.
+Open **http://127.0.0.1:3100** for the same activity, filters, search, pagination, and statistics periods, including unique wallet counts and total activity events. Timestamps show relative ages alongside exact dates and times; the relative labels update every second, including when the API is unavailable. The web view refreshes every five seconds. No frontend build is necessary. `HOST` and `PORT` can be changed in `.env`.
 
 The terminal and web UI can run together: the first process indexes history, and additional views follow its local cache. If the writer exits, restart a view to resume indexing. Only the optional web command opens a listening port.
 

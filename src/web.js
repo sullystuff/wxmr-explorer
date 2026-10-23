@@ -6,6 +6,7 @@ export function web(store, config) {
   const files = new Map([
     ['/', ['text/html; charset=utf-8', readFileSync(new URL('../public/index.html', import.meta.url))]],
     ['/app.js', ['text/javascript; charset=utf-8', readFileSync(new URL('../public/app.js', import.meta.url))]],
+    ['/time.js', ['text/javascript; charset=utf-8', readFileSync(new URL('./time.js', import.meta.url))]],
     ['/style.css', ['text/css; charset=utf-8', readFileSync(new URL('../public/style.css', import.meta.url))]],
   ]);
   const server = createServer((req, res) => {

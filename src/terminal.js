@@ -1,9 +1,11 @@
 import { emitKeypressEvents } from 'node:readline';
 import { TYPES, formatAmount } from './config.js';
+import { relativeTime } from './time.js';
 
 const short = (s, width) => s.length <= width ? s : `${s.slice(0, width - 5)}…${s.slice(-4)}`;
 const pad = (s, width) => short(String(s), width).padEnd(width);
 const time = value => value === null ? 'Unknown' : new Date(value * 1000).toISOString().slice(5, 19).replace('T', ' ');
+const age = value => value === null ? '—' : relativeTime(value * 1000);
 const color = (code, value) => `\x1b[${code}m${value}\x1b[0m`;
 function fitLine(line, width) {
   let visible = 0, result = '';
@@ -17,7 +19,7 @@ function fitLine(line, width) {
 
 export function printEvents(events, output = process.stdout) {
   for (const event of events) {
-    output.write(`${time(event.blockTime)} UTC  ${TYPES[event.type].label}  ${event.amount === null ? '' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`}\n`);
+    output.write(`${time(event.blockTime)} UTC${event.blockTime === null ? '' : ` (${age(event.blockTime)})`}  ${TYPES[event.type].label}  ${event.amount === null ? '' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`}\n`);
     output.write(`  Wallet: ${event.owner}\n  Record: ${event.pda}\n  Tx: ${event.txUrl}\n`);
   }
 }
@@ -25,7 +27,7 @@ export function printEvents(events, output = process.stdout) {
 export function supplyLine(status) {
   const supply = status.supply;
   if (!supply) return `On-chain supply: unavailable${status.supplyError ? ` · ${status.supplyError}` : ' · awaiting finalized RPC snapshot'}`;
-  return `On-chain supply: ${supply.amount} wXMR${supply.stale ? ' · STALE' : ''} · finalized slot ${supply.slot} · ${supply.checkedAt}`;
+  return `On-chain supply: ${supply.amount} wXMR${supply.stale ? ' · STALE' : ''} · finalized slot ${supply.slot} · ${supply.checkedAt} (${relativeTime(Date.parse(supply.checkedAt))})`;
 }
 
 export function terminal(store, options, stop, following = false) {
@@ -68,7 +70,7 @@ export function terminal(store, options, stop, following = false) {
     if (details && lastRows[selected]) {
       const event = lastRows[selected];
       lines.splice(1);
-      lines.push('', color('1', TYPES[event.type].label), `Time: ${time(event.blockTime)} UTC · slot ${event.slot}`,
+      lines.push('', color('1', TYPES[event.type].label), `Time: ${time(event.blockTime)} UTC${event.blockTime === null ? '' : ` · ${age(event.blockTime)}`} · slot ${event.slot}`,
         `Amount: ${event.amount === null ? '—' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`}`,
         `Wallet: ${event.owner}`, `Record: ${event.pda}`, `Signature: ${event.signature}`, `Solscan: ${event.txUrl}`);
       if (event.xmrAddress) lines.push(`XMR destination: ${event.xmrAddress}`, `Fee: ${event.feeAtomic === null ? 'not reported by legacy event' : `${formatAmount(event.feeAtomic)} wXMR`}`);
@@ -76,11 +78,11 @@ export function terminal(store, options, stop, following = false) {
       lines.push('', 'Esc / Enter: back to activity');
     } else {
       const small = width < 90;
-      const amountWidth = Math.min(26, Math.max(18, width - (small ? 40 : 72)));
-      lines.push(color('1', `  ${pad('TIME (UTC)', 15)}${pad('EVENT', 24)}${pad('AMOUNT', amountWidth)}${small ? '' : `${pad('WALLET', 18)}TRANSACTION`}`));
+      const amountWidth = Math.min(26, Math.max(18, width - (small ? 50 : 82)));
+      lines.push(color('1', `  ${pad('TIME (UTC)', 15)}${pad('AGE', 10)}${pad('EVENT', 24)}${pad('AMOUNT', amountWidth)}${small ? '' : `${pad('WALLET', 18)}TRANSACTION`}`));
       for (const [i, event] of lastRows.entries()) {
         const amount = event.amount === null ? '—' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`;
-        const line = `${i === selected ? '› ' : '  '}${pad(time(event.blockTime), 15)}${pad(TYPES[event.type].label, 24)}${pad(amount, amountWidth)}${small ? '' : `${pad(event.owner, 18)}${short(event.signature, Math.max(12, width - 59 - amountWidth))}`}`;
+        const line = `${i === selected ? '› ' : '  '}${pad(time(event.blockTime), 15)}${pad(age(event.blockTime), 10)}${pad(TYPES[event.type].label, 24)}${pad(amount, amountWidth)}${small ? '' : `${pad(event.owner, 18)}${short(event.signature, Math.max(12, width - 69 - amountWidth))}`}`;
         lines.push(i === selected ? color('38;5;208', line) : line);
       }
       if (!lastRows.length) lines.push(color('90', status.pending ? 'Loading bridge activity…' : 'No matching events indexed yet.'));
@@ -89,7 +91,7 @@ export function terminal(store, options, stop, following = false) {
     }
     const coverage = status.historyExhausted && status.eventBackfillComplete && !status.pending && !status.historyGap ? 'RPC history indexed' : 'History indexing; volumes cover indexed events';
     lines.push(color('90', `${coverage} · ${status.transactionsScanned} tx scanned · ${status.pending} queued${status.unresolved ? ` · ${status.unresolved} awaiting retry` : ''}`));
-    lines.push(status.error ? color('31', status.error) : color('90', `Last sync: ${status.lastSync ? new Date(status.lastSync).toLocaleTimeString() : 'connecting…'}`));
+    lines.push(status.error ? color('31', status.error) : color('90', `Last sync: ${status.lastSync ? `${new Date(status.lastSync).toLocaleTimeString()} · ${relativeTime(Date.parse(status.lastSync))}` : 'connecting…'}`));
     lines.push(editing ? `Search: ${search}█  (Enter to apply / Esc to clear)` : color('90', '0 all · 1 create · 2 mint · 3 withdraw · / find · n/p · ↑↓ · Enter · q'));
     const rendered = details ? lines.flatMap(line => {
       if (line.includes('\x1b')) return [fitLine(line, width)];

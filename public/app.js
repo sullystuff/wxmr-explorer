@@ -1,3 +1,5 @@
+import { relativeTime } from './time.js';
+
 const labels = { create: 'Deposit address created', mint: 'Mint deposit', withdraw: 'Withdraw request' };
 let period = '24h';
 let type = '';
@@ -24,6 +26,18 @@ function link(text, url, title) {
   if (title) element.title = title;
   return element;
 }
+function relativeDate(date) {
+  const element = node('time', relativeTime(date.getTime()));
+  element.dateTime = date.toISOString();
+  element.title = element.dateTime;
+  element.dataset.relative = '';
+  return element;
+}
+function updateRelativeTimes() {
+  for (const element of document.querySelectorAll('time[data-relative]')) {
+    element.textContent = relativeTime(Date.parse(element.dateTime));
+  }
+}
 function renderStats() {
   const stats = status?.stats.find(window => window.id === period);
   if (!stats) return;
@@ -40,6 +54,7 @@ function renderStats() {
   const supply = status.supply;
   $('supply').textContent = supply?.amount ?? '—';
   $('supply-status').textContent = supply ? `${supply.stale ? 'Stale · ' : ''}Finalized slot ${integer(supply.slot)} · checked ${new Date(supply.checkedAt).toLocaleTimeString()}` : 'Awaiting finalized RPC snapshot';
+  if (supply) $('supply-status').append(' · ', relativeDate(new Date(supply.checkedAt)));
   $('supply-status').classList.toggle('stale', !!supply?.stale || !!status.supplyError);
   $('supply-error').textContent = status.supplyError || '';
   $('supply-error').hidden = !status.supplyError;
@@ -63,7 +78,11 @@ function renderRows(result) {
     wallet.append(link(event.owner, `https://solscan.io/account/${event.owner}`));
     const date = event.blockTime === null ? null : new Date(event.blockTime * 1000);
     const when = node('td', date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown time');
-    if (date) { when.title = date.toISOString(); when.append(node('span', `${date.toLocaleTimeString()} · slot ${integer(event.slot)}`, 'sub')); }
+    if (date) {
+      when.title = date.toISOString();
+      when.append(' · ', relativeDate(date));
+      when.append(node('span', `${date.toLocaleTimeString()} · slot ${integer(event.slot)}`, 'sub'));
+    }
     const tx = node('td', undefined, 'tx');
     tx.append(link(`${short(event.signature)} ↗`, event.txUrl, event.signature));
     row.append(kind, amount, wallet, when, tx);
@@ -95,6 +114,7 @@ async function refresh() {
     renderStats();
     renderRows(result);
     $('sync').textContent = status.lastSync ? `Synced ${new Date(status.lastSync).toLocaleTimeString()}` : 'Connecting to Helius…';
+    if (status.lastSync) $('sync').append(' · ', relativeDate(new Date(status.lastSync)));
     const complete = status.historyExhausted && status.eventBackfillComplete && status.pending === 0 && !status.historyGap;
     $('coverage').textContent = `${complete ? 'RPC history indexed' : 'History indexing · totals cover indexed events'} · ${integer(status.transactionsScanned)} tx scanned${status.pending ? ` · ${integer(status.pending)} queued` : ''}${status.unresolved ? ` · ${integer(status.unresolved)} awaiting retry` : ''}`;
     $('error').textContent = status.error || '';
@@ -129,6 +149,7 @@ $('previous').addEventListener('click', () => { offset = Math.max(0, offset - 50
 $('next').addEventListener('click', () => { offset += 50; refresh(); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearTimeout(timer);
-  else refresh();
+  else { updateRelativeTimes(); refresh(); }
 });
+setInterval(() => { if (!document.hidden) updateRelativeTimes(); }, 1000);
 refresh();
