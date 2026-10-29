@@ -19,7 +19,7 @@ cp .env.example .env
 npm start
 ```
 
-The terminal dashboard refreshes automatically and shows the **current on-chain wXMR supply** separately from **8h, 24h, 7d, and all-indexed** minted volume, net withdrawals, unique users/depositors/withdrawers, event counts, and indexed net flow. Times in the activity table are UTC, with relative ages such as `2h ago` alongside them. Press Enter on a selected event for full addresses, amounts, and transaction links.
+The terminal dashboard refreshes automatically and shows the **current on-chain wXMR supply** separately from **8h, 24h, 7d, and all-indexed** minted volume, net withdrawals, **bridge fees in wXMR and estimated USD**, unique users/depositors/withdrawers, event counts, and indexed net flow. Times in the activity table are UTC, with relative ages such as `2h ago` alongside them. Press Enter on a selected event for full addresses, amounts, and transaction links.
 
 | Key | Action |
 | --- | --- |
@@ -36,7 +36,7 @@ npm start -- --search SOLANA_WALLET
 npm start -- --json                  # Live JSONL; also works without a TTY.
 npm run events -- --limit 50         # Cached activity; makes no RPC calls.
 npm run events -- --type withdraw --json
-npm start -- stats --json            # Cached volumes, user counts, and indexing status.
+npm start -- stats --json            # Cached volumes, fees, user counts, and indexing status.
 npm run sync -- --passes 8           # Bounded sync, about 25 transactions per pass.
 ```
 
@@ -60,6 +60,8 @@ All amounts use **12 decimal places** (1 XMR = 10¹² atomic units). Atomic amou
 - Deposit volume includes the wXMR minted by both `DepositMintedEvent` and the original `DepositCompletedEvent`.
 - **Net withdrawal volume** is XMR requested/burned minus wXMR re-minted by reversals/cancellations, excluding bridge fees. Both movements use their own transaction block times, so net withdrawals can be negative in a window containing a reversal of an older request. Request counts and activity still reflect the original requests, rather than completed payouts.
 - Refunds adjust net withdrawal volume internally; there is no separate refund view or summary. The retained fee is not refunded.
+- **Bridge fees** sum the exact `feeAtomic` values from withdrawal requests in each period, independently of net withdrawal volume. Fees remain counted if a request is later canceled or reversed; refund events do not add the fee a second time. Legacy requests without a reported fee are excluded from the fee sum and their count is shown. Cached stats JSON and `/api/status` include `feesAtomic`, `fees` (wXMR), `feesUsd` (a decimal USD string, or `null` without a quote), and `feesUnreported` for every window.
+- **USD fee estimates** value each period's fee total at the **current wXMR market price**, rather than prices at the time fees were collected. The cache's indexer fetches the most liquid Solana pair with the wXMR mint as its base token from [DEX Screener](https://docs.dexscreener.com/api/reference) once per minute. The quote's source, price, and check time are included in status; estimates are rounded to cents using integer arithmetic. A failed refresh or a quote older than five minutes is marked stale while retaining the last quote. Without a quote, USD is unavailable and wXMR totals still display. Market requests run independently of bridge indexing; additional views follow the cached quote, and cached `stats` commands make no network requests.
 - **Indexed net flow = minted deposits − net withdrawals**, expressed in XMR units. It is not a reserve balance or a substitute for on-chain supply: token burns outside the bridge and missing provider history can make them differ.
 - Time windows use transaction block times. Events without a known block time count only toward all-indexed totals.
 - **Unique users** counts distinct Solana owner wallets with a deposit address creation, minted deposit, or withdrawal request in the period. **Unique depositors** and **unique withdrawers** count wallets with mints and withdrawal requests, respectively. Repeated events from the same wallet count once; a wallet can belong to both groups. Wallet counts do not identify individual people. Accounting-only refunds do not add users or activity events. **Activity events** is the number of address creations, mints, and withdrawal requests, rather than a count of distinct transactions. These counts use the same time windows and indexed-history coverage as volumes and are included in cached stats JSON and `/api/status`.
@@ -83,7 +85,7 @@ HOST=127.0.0.1
 PORT=3100
 ```
 
-`.env`, environment variants, local SQLite state, logs, and dependencies are ignored by Git. Only `.env.example` is tracked. The Helius URL is used by Node only; it is never returned by the API or included in browser assets. Provider error bodies are not logged. No signing, transaction submission, Monero wallet access, or bridge backend access is used.
+`.env`, environment variants, local SQLite state, logs, and dependencies are ignored by Git. Only `.env.example` is tracked. The Helius URL is used by Node only; it is never returned by the API or included in browser assets. The public DEX Screener API supplies wXMR/USD quotes without an API key. Provider error bodies are not logged. No signing, transaction submission, Monero wallet access, or bridge backend access is used.
 
 History lives in `data/explorer.sqlite`; it is independent of the bridge's databases. HTTP reads are paced and transaction requests are batched in groups of up to 25. The live signature poll defaults to 15 seconds; historical backfill continues while the process runs and uses Helius credits.
 
