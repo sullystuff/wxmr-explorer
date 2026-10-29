@@ -30,6 +30,16 @@ export function supplyLine(status) {
   return `On-chain supply: ${supply.amount} wXMR${supply.stale ? ' · STALE' : ''} · finalized slot ${supply.slot} · ${supply.checkedAt} (${relativeTime(Date.parse(supply.checkedAt))})`;
 }
 
+export function priceLine(status) {
+  const price = status.price;
+  if (!price) return 'Fee USD estimates: unavailable · awaiting wXMR market price';
+  return `Fee USD estimates: $${price.usd}/wXMR · ${price.source}${price.stale ? ' · STALE' : ''} · ${relativeTime(Date.parse(price.checkedAt))}`;
+}
+
+export function feeLine(window) {
+  return `${window.fees} wXMR · ${window.feesUsd === null ? 'USD unavailable' : `≈ $${window.feesUsd}`}${window.feesUnreported ? ` · ${window.feesUnreported} fees unreported` : ''}`;
+}
+
 export function terminal(store, options, stop, following = false) {
   let type = options.type || '';
   let search = options.search || '';
@@ -39,7 +49,8 @@ export function terminal(store, options, stop, following = false) {
   let details = false;
   let lastRows = [];
   const out = process.stdout;
-  const pageSize = () => Math.max(1, (out.rows || 30) - 23);
+  const compact = () => (out.rows || 30) < 28;
+  const pageSize = () => Math.max(1, (out.rows || 30) - (compact() ? 25 : 29));
   out.write('\x1b[?1049h\x1b[?25l');
   process.stdin.setRawMode(true);
   process.stdin.resume();
@@ -58,14 +69,16 @@ export function terminal(store, options, stop, following = false) {
     const lines = [
       color('1;38;5;208', 'wXMR / bridge explorer') + color('90', `  mainnet · finalized${following ? ' · following local indexer' : ''}`),
       color(!status.supply || status.supply.stale || status.supplyError ? '33' : '32', supplyLine(status)),
-      color('90', 'Indexed net flow = minted - net withdrawals; excludes burns outside the bridge'),
-      '',
+      ...(compact() ? [] : [color('90', 'Indexed net flow = minted - net withdrawals; excludes burns outside the bridge'), '']),
       color('1', `${pad('VOLUME', 12)}${pad('MINTED (wXMR)', column)}${pad('NET OUT (XMR)', column)}NET FLOW (XMR)`),
       ...stats.map(window => `${pad(window.label, 12)}${pad(window.deposited, column)}${pad(window.withdrawn, column)}${window.netFlow}`),
-      color('90', 'Users, depositors, withdrawers = distinct Solana wallets per period'),
+      color('1', 'BRIDGE FEES (wXMR / estimated USD)'),
+      ...stats.map(window => `${pad(window.label, 12)}${feeLine(window)}`),
+      color(!status.price || status.price.stale ? '33' : '90', priceLine(status)),
+      ...(compact() ? [] : [color('90', 'Users, depositors, withdrawers = distinct Solana wallets per period')]),
       color('1', `${pad('ACTIVITY', 12)}${countLabels.map(label => pad(label, label.length + 2)).join('')}`),
       ...stats.map(window => `${pad(window.label, 12)}${[window.uniqueUsers, window.uniqueDepositors, window.uniqueWithdrawers, window.creates, window.deposits, window.withdrawals].map((count, i) => pad(count, countLabels[i].length + 2)).join('')}`),
-      '',
+      ...(compact() ? [] : ['']),
     ];
     if (details && lastRows[selected]) {
       const event = lastRows[selected];

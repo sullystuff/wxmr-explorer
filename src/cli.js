@@ -6,8 +6,9 @@ import { Store } from './store.js';
 import { Rpc } from './rpc.js';
 import { Indexer } from './indexer.js';
 import { acquireLock } from './lock.js';
-import { terminal, printEvents, supplyLine } from './terminal.js';
+import { terminal, printEvents, supplyLine, priceLine, feeLine } from './terminal.js';
 import { web } from './web.js';
+import { PriceFeed } from './price.js';
 
 const help = `wXMR bridge explorer — terminal by default, no listening port
 
@@ -24,6 +25,7 @@ const help = `wXMR bridge explorer — terminal by default, no listening port
 Types: create, mint, withdraw (or all). Node.js 22.13+ required.
 Keyboard: 0/1/2/3 filters, / search, n/p pages, ↑↓ select, Enter details, q quit.
 Volumes: minted deposits and net withdrawals; indexed history only.
+Fees: bridge fees in wXMR and estimated USD at the current wXMR market price.
 Users: distinct Solana wallets creating addresses, minting, or requesting withdrawals.
 On-chain supply is read independently at finalized commitment.
 Helius URL goes in the ignored .env as SOLANA_RPC_URL.
@@ -45,7 +47,7 @@ async function main() {
   if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(passes) || passes < 1 || passes > 10000) throw new Error('Invalid limit or passes');
   const settings = config();
   const store = new Store(join(settings.dataDir, 'explorer.sqlite'));
-  let release, rpc, server, cleanup;
+  let release, rpc, server, cleanup, priceFeed;
   let stopping = false;
   const controller = new AbortController();
   const stop = () => {
@@ -64,8 +66,10 @@ async function main() {
       if (values.json) console.log(JSON.stringify({ stats: store.stats(), status: store.status() }, null, 2));
       else {
         console.log(supplyLine(store.status()));
+        console.log(priceLine(store.status()));
         for (const window of store.stats()) {
           console.log(`${window.label}: deposits ${window.deposited} wXMR · net withdrawals ${window.withdrawn} XMR · indexed net flow ${window.netFlow} XMR`);
+          console.log(`  Bridge fees: ${feeLine(window)}`);
           console.log(`  Unique users: ${window.uniqueUsers} · depositors: ${window.uniqueDepositors} · withdrawers: ${window.uniqueWithdrawers} · activity events: ${window.activityEvents}`);
           console.log(`  Addresses created: ${window.creates} · mints: ${window.deposits} · requests: ${window.withdrawals}`);
         }
@@ -74,11 +78,13 @@ async function main() {
     }
     release = acquireLock(settings.dataDir);
     if (release) rpc = new Rpc(settings.rpcUrl, settings.rpcMs);
+    if (release) priceFeed = new PriceFeed(store);
     const indexer = rpc ? new Indexer(store, rpc, settings.pollMs) : null;
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     if (command === 'sync') {
       if (!indexer) throw new Error('Another explorer is already indexing this cache');
+      await priceFeed.poll();
       for (let i = 0; i < passes && !stopping; i++) await indexer.tick();
       console.log(JSON.stringify({ status: store.status(), stats: store.stats() }, null, 2));
       return;
@@ -92,6 +98,8 @@ async function main() {
     let reportedError = '';
     let initial = true;
     while (!stopping) {
+      // Price lookup runs independently, so a market API outage cannot delay indexing.
+      if (priceFeed) void priceFeed.poll();
       if (indexer) {
         try { await indexer.tick(); reportedError = ''; }
         catch (error) {
@@ -117,6 +125,7 @@ async function main() {
     cleanup?.();
     if (server) await new Promise(resolve => server.close(resolve));
     rpc?.close();
+    await priceFeed?.close();
     release?.();
     store.close();
     process.off('SIGINT', stop);
