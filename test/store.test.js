@@ -3,11 +3,59 @@ import assert from 'node:assert/strict';
 import { Store } from '../src/store.js';
 
 const now = 1700000000000;
-function save(store, signature, type, amountAtomic, secondsAgo, slot, owner = 'wallet') {
+function save(store, signature, type, amountAtomic, secondsAgo, slot, owner = 'wallet', feeAtomic = null) {
   const entry = { signature, slot, blockTime: secondsAgo === null ? null : now / 1000 - secondsAgo, err: null };
   store.enqueue([entry]);
-  store.save({ ...entry, block_time: entry.blockTime }, [{ index: 1, type, owner, pda: 'record', ...(amountAtomic ? { amountAtomic } : {}) }]);
+  store.save({ ...entry, block_time: entry.blockTime }, [{ index: 1, type, owner, pda: 'record', feeAtomic, ...(amountAtomic ? { amountAtomic } : {}) }]);
 }
+test('fee totals use exact request fees and period boundaries, without counting refunds twice', () => {
+  const store = new Store(':memory:');
+  try {
+    const withdraw = (signature, fee, secondsAgo, slot) => save(store, signature, 'withdraw', '1', secondsAgo, slot, 'wallet', fee);
+    withdraw('recent', '9007199254740993', 60, 1);
+    withdraw('recent', '9007199254740993', 60, 1);
+    withdraw('8h-boundary', '1', 8 * 3600, 2);
+    withdraw('outside-8h', '2', 8 * 3600 + 1, 3);
+    withdraw('24h-boundary', '4', 24 * 3600, 4);
+    withdraw('outside-24h', '8', 24 * 3600 + 1, 5);
+    withdraw('7d-boundary', '16', 7 * 86400, 6);
+    withdraw('outside-7d', '32', 7 * 86400 + 1, 7);
+    withdraw('unknown-time', '64', null, 8);
+    withdraw('future', '128', -1, 9);
+    withdraw('legacy', null, 60, 10);
+    withdraw('legacy-unknown-time', null, null, 11);
+    withdraw('zero-fee', '0', 60, 12);
+    save(store, 'refunded', 'refund', '1', 60, 13, 'wallet', '9007199254740993');
+    save(store, 'mint', 'mint', '1000000000000', 60, 14, 'wallet', '999');
+    store.set('price', { usd: '1' });
+    const expected = { '8h': ['9007199254740994', 1], '24h': ['9007199254741000', 1], '7d': ['9007199254741024', 1], all: ['9007199254741248', 2] };
+    for (const window of store.stats(now)) {
+      assert.deepEqual([window.feesAtomic, window.feesUnreported], expected[window.id], window.id);
+      assert.equal(window.feesUsd, '9007.20', window.id);
+    }
+    assert.equal(store.stats(now)[0].fees, '9007.199254740994');
+    assert.equal(store.stats(now + 5000)[0].feesAtomic, '9007199254741121', 'fee leaves at the rolling boundary and future request enters');
+  } finally { store.close(); }
+});
+test('USD fee estimates update with the cached price and stay unavailable until a price is known', () => {
+  const store = new Store(':memory:');
+  try {
+    assert.equal(store.stats(now)[0].fees, '0');
+    assert.equal(store.stats(now)[0].feesUsd, null);
+    save(store, 'fee', 'withdraw', '5000000000000', 60, 1, 'wallet', '1234567890000');
+    store.set('price', { usd: '100' });
+    assert.equal(store.stats(now)[0].feesUsd, '123.46');
+    store.set('price', { usd: '200' });
+    assert.equal(store.stats(now)[0].feesUsd, '246.91');
+    assert.equal(store.stats(now)[0].feesAtomic, '1234567890000');
+    store.set('priceError', 'Market API unavailable');
+    assert.equal(store.status().price.stale, true);
+    assert.equal(store.stats(now)[0].feesUsd, '246.91', 'last known valuation stays available with a stale quote');
+    store.set('priceError', null);
+    store.set('price', { usd: '200', checkedAt: new Date(Date.now() - 301000).toISOString() });
+    assert.equal(store.status().price.stale, true);
+  } finally { store.close(); }
+});
 test('volume windows have exact sums, exclude fees, and count creation separately', () => {
   const store = new Store(':memory:');
   try {

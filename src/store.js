@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { PROGRAM_ID, GENESIS_HASH, EVENT_VERSION, ACTIVITY_TYPES, formatAmount } from './config.js';
+import { feesUsd, PRICE_MAX_AGE_MS } from './price.js';
 
 export class Store {
   constructor(path) {
@@ -108,6 +109,7 @@ export class Store {
     const counts = { create: 0, mint: 0, withdraw: 0, refund: 0 };
     for (const row of this.db.prepare('SELECT type,count(*) AS n FROM events GROUP BY type').all()) counts[row.type] = row.n;
     const supply = this.get('supply');
+    const price = this.get('price');
     return {
       programId: PROGRAM_ID, network: 'mainnet-beta', commitment: 'finalized', counts,
       pending: this.pendingCount(),
@@ -118,28 +120,37 @@ export class Store {
       eventBackfillComplete: this.get('eventVersion') === EVENT_VERSION && (this.get('eventBackfill')?.exhausted ?? false),
       supply: supply ? { ...supply, stale: !!this.get('supplyError') || Date.now() - Date.parse(supply.checkedAt) > 60000 } : null,
       supplyError: this.get('supplyError'),
+      price: price ? { ...price, stale: !!this.get('priceError') || !Number.isFinite(Date.parse(price.checkedAt)) || Date.now() - Date.parse(price.checkedAt) > PRICE_MAX_AGE_MS } : null,
+      priceError: this.get('priceError'),
       lastSync: this.get('lastSync'), error: this.get('error'), historyGap: this.get('historyGap'),
     };
   }
   stats(now = Date.now()) {
     const interval = Math.floor(now / 5000);
     const version = this.db.prepare('PRAGMA data_version').get().data_version;
-    if (this.statsCache && this.statsCache.interval === interval && this.statsCache.version === version) return this.statsCache.value;
+    const price = this.get('price')?.usd ?? null;
+    if (this.statsCache && this.statsCache.interval === interval && this.statsCache.version === version && this.statsCache.price === price) return this.statsCache.value;
     const windows = [
       ['8h', '8 hours', 8 * 3600], ['24h', '24 hours', 24 * 3600],
       ['7d', '7 days', 7 * 86400], ['all', 'All indexed', null],
     ].map(([id, label, seconds]) => ({
       id, label, from: seconds === null ? null : Math.floor(now / 1000) - seconds,
       creates: 0, deposits: 0, withdrawals: 0, refunds: 0, deposited: 0n, withdrawn: 0n, refunded: 0n,
+      fees: 0n, feesUnreported: 0,
       users: new Set(), depositors: new Set(), withdrawers: new Set(),
     }));
-    for (const row of this.db.prepare('SELECT type,owner,amount_atomic,block_time FROM events').all()) {
+    for (const row of this.db.prepare(`SELECT type,owner,amount_atomic,block_time,
+      CASE WHEN type='withdraw' THEN json_extract(data,'$.feeAtomic') END AS fee_atomic FROM events`).all()) {
       for (const window of windows) {
         if (window.from !== null && (row.block_time === null || row.block_time < window.from || row.block_time > now / 1000)) continue;
         if (ACTIVITY_TYPES.includes(row.type)) window.users.add(row.owner);
         if (row.type === 'create') window.creates++;
         if (row.type === 'mint') { window.deposits++; window.depositors.add(row.owner); window.deposited += BigInt(row.amount_atomic); }
-        if (row.type === 'withdraw') { window.withdrawals++; window.withdrawers.add(row.owner); window.withdrawn += BigInt(row.amount_atomic); }
+        if (row.type === 'withdraw') {
+          window.withdrawals++; window.withdrawers.add(row.owner); window.withdrawn += BigInt(row.amount_atomic);
+          if (row.fee_atomic === null) window.feesUnreported++;
+          else window.fees += BigInt(row.fee_atomic);
+        }
         if (row.type === 'refund') { window.refunds++; window.refunded += BigInt(row.amount_atomic); }
       }
     }
@@ -150,10 +161,12 @@ export class Store {
       activityEvents: window.creates + window.deposits + window.withdrawals,
       depositedAtomic: window.deposited.toString(), withdrawnAtomic: (window.withdrawn - window.refunded).toString(),
       refundedAtomic: window.refunded.toString(),
+      feesAtomic: window.fees.toString(), fees: formatAmount(window.fees),
+      feesUsd: feesUsd(window.fees, price), feesUnreported: window.feesUnreported,
       deposited: formatAmount(window.deposited), withdrawn: formatAmount(window.withdrawn - window.refunded), refunded: formatAmount(window.refunded),
       netFlow: formatAmount(window.deposited - window.withdrawn + window.refunded),
     }));
-    this.statsCache = { interval, version, value };
+    this.statsCache = { interval, version, price, value };
     return value;
   }
   close() { this.db.close(); }
