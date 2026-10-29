@@ -44,6 +44,13 @@ function renderStats() {
   $('deposited').textContent = stats.deposited;
   $('withdrawn').textContent = stats.withdrawn;
   $('net-flow').textContent = stats.netFlow;
+  $('fees').textContent = stats.fees;
+  $('fees-usd').textContent = stats.feesUsd === null ? '—' : `≈ $${stats.feesUsd}`;
+  $('fee-coverage').textContent = stats.feesUnreported ? `Excludes ${integer(stats.feesUnreported)} legacy requests without reported fees` : 'Recorded withdrawal fees';
+  const price = status.price;
+  $('fee-price').textContent = price ? `${price.stale ? 'Stale · ' : ''}$${price.usd}/wXMR · ${price.source}` : 'USD price unavailable';
+  if (price) $('fee-price').append(' · ', relativeDate(new Date(price.checkedAt)));
+  $('fee-price').classList.toggle('stale', !!price?.stale || !!status.priceError);
   $('creates').textContent = integer(stats.creates);
   $('unique-users').textContent = integer(stats.uniqueUsers);
   $('unique-depositors').textContent = integer(stats.uniqueDepositors);
