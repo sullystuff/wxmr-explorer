@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { PROGRAM_ID, GENESIS_HASH, EVENT_VERSION, ACTIVITY_TYPES, formatAmount } from './config.js';
+import { PROGRAM_ID, GENESIS_HASH, EVENT_VERSION, FEE_VERSION, FEE_ACCOUNT_ID, ACTIVITY_TYPES, formatAmount } from './config.js';
 import { feesUsd, PRICE_MAX_AGE_MS } from './price.js';
 
 export class Store {
@@ -25,6 +25,9 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS event_order ON events(slot DESC, signature, log_index DESC);
       CREATE INDEX IF NOT EXISTS event_type ON events(type, slot DESC);
+      CREATE TABLE IF NOT EXISTS transaction_fees (
+        signature TEXT PRIMARY KEY, delta_atomic TEXT NOT NULL
+      );
     `);
     const identity = `${GENESIS_HASH}:${PROGRAM_ID}`;
     if (this.get('identity') && this.get('identity') !== identity) throw new Error('Cache belongs to another bridge');
@@ -68,6 +71,21 @@ export class Store {
     return this.db.prepare("SELECT DISTINCT pda FROM events WHERE type='withdraw' AND pda>? ORDER BY pda LIMIT ?")
       .all(afterPda, limit).map(row => row.pda);
   }
+  prepareFeeBackfill() {
+    if (this.get('feeVersion') === FEE_VERSION) return;
+    this.transaction(() => {
+      // Revisit bridge activity only, preserving the much larger audit history.
+      this.db.prepare(`UPDATE queue SET done=0,retry_at=0,error=NULL,priority=0
+        WHERE failed=0 AND signature IN (
+          SELECT signature FROM events WHERE type IN ('mint','withdraw')
+        ) AND signature NOT IN (SELECT signature FROM transaction_fees)`).run();
+      this.set('feeVersion', FEE_VERSION);
+    });
+  }
+  feesPending() {
+    return this.db.prepare(`SELECT count(DISTINCT signature) AS n FROM events
+      WHERE type IN ('mint','withdraw') AND signature NOT IN (SELECT signature FROM transaction_fees)`).get().n;
+  }
   requeueKnown(entries) {
     const update = this.db.prepare('UPDATE queue SET done=0,retry_at=0,error=NULL WHERE signature=? AND failed=0');
     for (const entry of entries) update.run(entry.signature);
@@ -75,12 +93,16 @@ export class Store {
   defer(signature, error) {
     this.db.prepare('UPDATE queue SET retry_at=?,error=? WHERE signature=?').run(Date.now() + 60000, error, signature);
   }
-  save(entry, events) {
+  save(entry, events, feeDeltaAtomic = null) {
     this.transaction(() => {
       const insert = this.db.prepare('INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING');
       for (const event of events) {
         insert.run(`${entry.signature}:${event.index}`, event.type, entry.signature, entry.slot, event.index,
           entry.block_time ?? null, event.owner, event.pda, event.amountAtomic ?? null, JSON.stringify(event));
+      }
+      if (feeDeltaAtomic !== null && events.some(event => ['mint', 'withdraw'].includes(event.type))) {
+        this.db.prepare(`INSERT INTO transaction_fees VALUES (?,?)
+          ON CONFLICT(signature) DO UPDATE SET delta_atomic=excluded.delta_atomic`).run(entry.signature, feeDeltaAtomic);
       }
       this.db.prepare('UPDATE queue SET done=1,error=NULL WHERE signature=?').run(entry.signature);
     });
@@ -97,11 +119,14 @@ export class Store {
     }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
     const total = this.db.prepare(`SELECT count(*) AS n FROM events ${where}`).get(...params).n;
-    const rows = this.db.prepare(`SELECT * FROM events ${where} ORDER BY slot DESC,signature,log_index DESC LIMIT ? OFFSET ?`)
+    const rows = this.db.prepare(`SELECT *,
+      (SELECT delta_atomic FROM transaction_fees WHERE signature=events.signature) AS fee_delta_atomic
+      FROM events ${where} ORDER BY slot DESC,signature,log_index DESC LIMIT ? OFFSET ?`)
       .all(...params, limit, offset);
     return { total, events: rows.map(row => ({
       ...JSON.parse(row.data), id: row.id, signature: row.signature, slot: row.slot,
       blockTime: row.block_time, amount: row.amount_atomic === null ? null : formatAmount(row.amount_atomic),
+      feeDeltaAtomic: row.fee_delta_atomic, feeDelta: row.fee_delta_atomic === null ? null : formatAmount(row.fee_delta_atomic),
       txUrl: `https://solscan.io/tx/${row.signature}`,
     })) };
   }
@@ -110,6 +135,7 @@ export class Store {
     for (const row of this.db.prepare('SELECT type,count(*) AS n FROM events GROUP BY type').all()) counts[row.type] = row.n;
     const supply = this.get('supply');
     const price = this.get('price');
+    const feesPending = this.feesPending();
     return {
       programId: PROGRAM_ID, network: 'mainnet-beta', commitment: 'finalized', counts,
       pending: this.pendingCount(),
@@ -118,6 +144,8 @@ export class Store {
       oldestIndexedTime: this.db.prepare('SELECT min(block_time) AS n FROM queue WHERE done=1').get().n,
       historyExhausted: this.get('backfill')?.exhausted ?? false,
       eventBackfillComplete: this.get('eventVersion') === EVENT_VERSION && (this.get('eventBackfill')?.exhausted ?? false),
+      feeAccount: FEE_ACCOUNT_ID, feesPending,
+      feeBackfillComplete: this.get('feeVersion') === FEE_VERSION && feesPending === 0,
       supply: supply ? { ...supply, stale: !!this.get('supplyError') || Date.now() - Date.parse(supply.checkedAt) > 60000 } : null,
       supplyError: this.get('supplyError'),
       price: price ? { ...price, stale: !!this.get('priceError') || !Number.isFinite(Date.parse(price.checkedAt)) || Date.now() - Date.parse(price.checkedAt) > PRICE_MAX_AGE_MS } : null,
@@ -136,11 +164,11 @@ export class Store {
     ].map(([id, label, seconds]) => ({
       id, label, from: seconds === null ? null : Math.floor(now / 1000) - seconds,
       creates: 0, deposits: 0, withdrawals: 0, refunds: 0, deposited: 0n, withdrawn: 0n, refunded: 0n,
-      fees: 0n, feesUnreported: 0,
+      fees: 0n, feesUnreported: 0, feeSignatures: new Set(),
       users: new Set(), depositors: new Set(), withdrawers: new Set(),
     }));
-    for (const row of this.db.prepare(`SELECT type,owner,amount_atomic,block_time,
-      CASE WHEN type='withdraw' THEN json_extract(data,'$.feeAtomic') END AS fee_atomic FROM events`).all()) {
+    for (const row of this.db.prepare(`SELECT e.type,e.owner,e.amount_atomic,e.block_time,e.signature,f.delta_atomic
+      FROM events e LEFT JOIN transaction_fees f ON f.signature=e.signature`).all()) {
       for (const window of windows) {
         if (window.from !== null && (row.block_time === null || row.block_time < window.from || row.block_time > now / 1000)) continue;
         if (ACTIVITY_TYPES.includes(row.type)) window.users.add(row.owner);
@@ -148,8 +176,11 @@ export class Store {
         if (row.type === 'mint') { window.deposits++; window.depositors.add(row.owner); window.deposited += BigInt(row.amount_atomic); }
         if (row.type === 'withdraw') {
           window.withdrawals++; window.withdrawers.add(row.owner); window.withdrawn += BigInt(row.amount_atomic);
-          if (row.fee_atomic === null) window.feesUnreported++;
-          else window.fees += BigInt(row.fee_atomic);
+        }
+        if (['mint', 'withdraw'].includes(row.type) && !window.feeSignatures.has(row.signature)) {
+          window.feeSignatures.add(row.signature);
+          if (row.delta_atomic === null) window.feesUnreported++;
+          else if (BigInt(row.delta_atomic) > 0n) window.fees += BigInt(row.delta_atomic);
         }
         if (row.type === 'refund') { window.refunds++; window.refunded += BigInt(row.amount_atomic); }
       }

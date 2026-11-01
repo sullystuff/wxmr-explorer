@@ -37,7 +37,7 @@ export function priceLine(status) {
 }
 
 export function feeLine(window) {
-  return `${window.fees} wXMR · ${window.feesUsd === null ? 'USD unavailable' : `≈ $${window.feesUsd}`}${window.feesUnreported ? ` · ${window.feesUnreported} fees unreported` : ''}`;
+  return `${window.fees} wXMR · ${window.feesUsd === null ? 'USD unavailable' : `≈ $${window.feesUsd}`}${window.feesUnreported ? ` · ${window.feesUnreported} tx awaiting fee verification` : ''}`;
 }
 
 export function terminal(store, options, stop, following = false) {
@@ -72,7 +72,7 @@ export function terminal(store, options, stop, following = false) {
       ...(compact() ? [] : [color('90', 'Indexed net flow = minted - net withdrawals; excludes burns outside the bridge'), '']),
       color('1', `${pad('VOLUME', 12)}${pad('MINTED (wXMR)', column)}${pad('NET OUT (XMR)', column)}NET FLOW (XMR)`),
       ...stats.map(window => `${pad(window.label, 12)}${pad(window.deposited, column)}${pad(window.withdrawn, column)}${window.netFlow}`),
-      color('1', 'BRIDGE FEES (wXMR / estimated USD)'),
+      color('1', 'BRIDGE FEES · DEPOSITS + WITHDRAWALS (wXMR / estimated USD)'),
       ...stats.map(window => `${pad(window.label, 12)}${feeLine(window)}`),
       color(!status.price || status.price.stale ? '33' : '90', priceLine(status)),
       ...(compact() ? [] : [color('90', 'Users, depositors, withdrawers = distinct Solana wallets per period')]),
@@ -87,6 +87,7 @@ export function terminal(store, options, stop, following = false) {
         `Amount: ${event.amount === null ? '—' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`}`,
         `Wallet: ${event.owner}`, `Record: ${event.pda}`, `Signature: ${event.signature}`, `Solscan: ${event.txUrl}`);
       if (event.xmrAddress) lines.push(`XMR destination: ${event.xmrAddress}`, `Fee: ${event.feeAtomic === null ? 'not reported by legacy event' : `${formatAmount(event.feeAtomic)} wXMR`}`);
+      if (['mint', 'withdraw'].includes(event.type)) lines.push(`Fee treasury delta (transaction): ${event.feeDelta === null ? 'awaiting verification' : `${event.feeDelta} wXMR`}`);
       if (event.reason) lines.push(`Reason: ${event.reason}`);
       lines.push('', 'Esc / Enter: back to activity');
     } else {
@@ -102,7 +103,7 @@ export function terminal(store, options, stop, following = false) {
       while (lines.length < (out.rows || 30) - 4) lines.push('');
       lines.push(`Page ${page + 1} · ${result.total} matching events · ${type ? TYPES[type].label : 'All events'}${search ? ` · search: ${search}` : ''}`);
     }
-    const coverage = status.historyExhausted && status.eventBackfillComplete && !status.pending && !status.historyGap ? 'RPC history indexed' : 'History indexing; volumes cover indexed events';
+    const coverage = status.historyExhausted && status.eventBackfillComplete && status.feeBackfillComplete && !status.pending && !status.historyGap ? 'RPC history indexed' : 'History indexing; totals cover indexed events';
     lines.push(color('90', `${coverage} · ${status.transactionsScanned} tx scanned · ${status.pending} queued${status.unresolved ? ` · ${status.unresolved} awaiting retry` : ''}`));
     lines.push(status.error ? color('31', status.error) : color('90', `Last sync: ${status.lastSync ? `${new Date(status.lastSync).toLocaleTimeString()} · ${relativeTime(Date.parse(status.lastSync))}` : 'connecting…'}`));
     lines.push(editing ? `Search: ${search}█  (Enter to apply / Esc to clear)` : color('90', '0 all · 1 create · 2 mint · 3 withdraw · / find · n/p · ↑↓ · Enter · q'));

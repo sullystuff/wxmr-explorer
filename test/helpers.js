@@ -13,5 +13,5 @@ export function logs(bytes) { return [`Program ${PROGRAM_ID} invoke [1]`, `Progr
 export function mint(amount = '9007199254740993') { return event('DepositMintedEvent', [pda, owner, u64(amount), u64(amount)]); }
 export function entry(signature, slot, blockTime = 1700000000) { return { signature, slot, blockTime, err: null }; }
 export function transaction(e, logMessages = logs(mint())) {
-  return { slot: e.slot, blockTime: e.blockTime, transaction: { signatures: [e.signature] }, meta: { err: null, logMessages } };
+  return { slot: e.slot, blockTime: e.blockTime, transaction: { signatures: [e.signature], message: { accountKeys: [] } }, meta: { err: null, logMessages } };
 }

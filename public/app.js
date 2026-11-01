@@ -46,7 +46,7 @@ function renderStats() {
   $('net-flow').textContent = stats.netFlow;
   $('fees').textContent = stats.fees;
   $('fees-usd').textContent = stats.feesUsd === null ? '—' : `≈ $${stats.feesUsd}`;
-  $('fee-coverage').textContent = stats.feesUnreported ? `Excludes ${integer(stats.feesUnreported)} legacy requests without reported fees` : 'Recorded withdrawal fees';
+  $('fee-coverage').textContent = stats.feesUnreported ? `Excludes ${integer(stats.feesUnreported)} transactions awaiting fee verification` : 'Deposit + withdrawal fees received';
   const price = status.price;
   $('fee-price').textContent = price ? `${price.stale ? 'Stale · ' : ''}$${price.usd}/wXMR · ${price.source}` : 'USD price unavailable';
   if (price) $('fee-price').append(' · ', relativeDate(new Date(price.checkedAt)));
@@ -122,7 +122,7 @@ async function refresh() {
     renderRows(result);
     $('sync').textContent = status.lastSync ? `Synced ${new Date(status.lastSync).toLocaleTimeString()}` : 'Connecting to Helius…';
     if (status.lastSync) $('sync').append(' · ', relativeDate(new Date(status.lastSync)));
-    const complete = status.historyExhausted && status.eventBackfillComplete && status.pending === 0 && !status.historyGap;
+    const complete = status.historyExhausted && status.eventBackfillComplete && status.feeBackfillComplete && status.pending === 0 && !status.historyGap;
     $('coverage').textContent = `${complete ? 'RPC history indexed' : 'History indexing · totals cover indexed events'} · ${integer(status.transactionsScanned)} tx scanned${status.pending ? ` · ${integer(status.pending)} queued` : ''}${status.unresolved ? ` · ${integer(status.unresolved)} awaiting retry` : ''}`;
     $('error').textContent = status.error || '';
     $('error').hidden = !status.error;

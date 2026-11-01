@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../src/store.js';
 import { Indexer } from '../src/indexer.js';
-import { GENESIS_HASH, MINT_ID } from '../src/config.js';
+import { GENESIS_HASH, MINT_ID, FEE_ACCOUNT_ID } from '../src/config.js';
 import { entry, transaction, event, pda, owner, u64, string, logs } from './helpers.js';
 
 test('unavailable transaction stays queued while later events are indexed', async () => {
@@ -72,6 +72,66 @@ test('failed transactions never create activity', async () => {
     assert.equal(store.list().total, 0);
     assert.equal(store.pendingCount(), 0);
   } finally { store.close(); }
+});
+test('missing treasury balances keep a deposit queued until its actual fee can be measured', async () => {
+  const store = new Store(':memory:');
+  try {
+    const e = entry('deposit-with-fee', 1);
+    const tx = transaction(e);
+    tx.transaction.message.accountKeys = [FEE_ACCOUNT_ID];
+    const indexer = new Indexer(store, { batch: async () => [tx] });
+    store.enqueue([e]);
+    await indexer.process();
+    assert.equal(store.pendingCount(), 1);
+    assert.equal(store.status().unresolved, 1);
+    assert.equal(store.list().total, 0);
+    tx.meta.preTokenBalances = [{ accountIndex: 0, mint: MINT_ID, uiTokenAmount: { amount: '9007199254740993', decimals: 12 } }];
+    tx.meta.postTokenBalances = [{ accountIndex: 0, mint: MINT_ID, uiTokenAmount: { amount: '9007199254741000', decimals: 12 } }];
+    store.requeueKnown([e]);
+    await indexer.process();
+    assert.equal(store.pendingCount(), 0);
+    assert.equal(store.stats()[3].feesAtomic, '7');
+    assert.equal(store.stats()[3].feesUnreported, 0);
+    assert.equal(store.list().events[0].feeDeltaAtomic, '7');
+  } finally { store.close(); }
+});
+test('fee backfill rechecks only unmeasured deposit and withdrawal transactions and survives restart', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'wxmr-explorer-fees-'));
+  const path = join(dir, 'cache.sqlite');
+  let store = new Store(path);
+  try {
+    const deposit = entry('old-deposit', 1), request = entry('request', 2), audit = entry('audit', 3);
+    const measured = entry('measured-deposit', 4);
+    store.enqueue([deposit, request, audit, measured]);
+    const mintEvent = { index: 1, type: 'mint', owner: 'wallet', pda: 'deposit', amountAtomic: '1000' };
+    store.save({ ...deposit, block_time: deposit.blockTime }, [mintEvent]);
+    store.save({ ...request, block_time: request.blockTime }, [{ ...mintEvent, type: 'withdraw', feeAtomic: '10' }]);
+    store.save({ ...audit, block_time: audit.blockTime }, []);
+    store.save({ ...measured, block_time: measured.blockTime }, [mintEvent], '5');
+    store.set('backfill', { before: 'existing-cursor', exhausted: true });
+    store.prepareFeeBackfill();
+    assert.deepEqual(store.pending().map(row => row.signature), [request.signature, deposit.signature]);
+    assert.equal(store.status().feesPending, 2);
+    assert.equal(store.status().feeBackfillComplete, false);
+    assert.equal(store.db.prepare('SELECT done FROM queue WHERE signature=?').get(audit.signature).done, 1);
+    assert.equal(store.db.prepare('SELECT done FROM queue WHERE signature=?').get(measured.signature).done, 1);
+    store.close();
+    store = new Store(path);
+    store.prepareFeeBackfill();
+    assert.equal(store.pendingCount(), 2);
+    const requestLogs = logs(event('WithdrawRequestedEvent', [pda, owner, u64(1), u64(1000), u64(10), string('xmr-destination'), Buffer.from([0]), Buffer.alloc(8)]));
+    const rpc = { batch: async requests => requests.map(r => r.params[0] === deposit.signature ? transaction(deposit) : transaction(request, requestLogs)) };
+    await new Indexer(store, rpc).process();
+    assert.equal(store.status().feeBackfillComplete, true);
+    assert.equal(store.stats()[3].feesAtomic, '5', 'pre-activation transactions contribute measured zero');
+    assert.equal(store.list().total, 3, 'existing activity is preserved');
+    assert.deepEqual(store.get('backfill'), { before: 'existing-cursor', exhausted: true });
+    store.prepareFeeBackfill();
+    assert.equal(store.pendingCount(), 0, 'completed fee upgrade does not repeat');
+  } finally { store.close(); rmSync(dir, { recursive: true }); }
 });
 test('reads finalized mint supply exactly and rejects malformed snapshots without replacing the last good value', async () => {
   const store = new Store(':memory:');

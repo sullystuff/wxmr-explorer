@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { Store } from '../src/store.js';
 
 const now = 1700000000000;
-function save(store, signature, type, amountAtomic, secondsAgo, slot, owner = 'wallet', feeAtomic = null) {
+function save(store, signature, type, amountAtomic, secondsAgo, slot, owner = 'wallet', feeAtomic = null, feeDeltaAtomic = feeAtomic) {
   const entry = { signature, slot, blockTime: secondsAgo === null ? null : now / 1000 - secondsAgo, err: null };
   store.enqueue([entry]);
-  store.save({ ...entry, block_time: entry.blockTime }, [{ index: 1, type, owner, pda: 'record', feeAtomic, ...(amountAtomic ? { amountAtomic } : {}) }]);
+  store.save({ ...entry, block_time: entry.blockTime }, [{ index: 1, type, owner, pda: 'record', feeAtomic, ...(amountAtomic ? { amountAtomic } : {}) }], feeDeltaAtomic);
 }
-test('fee totals use exact request fees and period boundaries, without counting refunds twice', () => {
+test('fee totals use exact deposit and withdrawal treasury deltas and period boundaries, without counting refunds twice', () => {
   const store = new Store(':memory:');
   try {
     const withdraw = (signature, fee, secondsAgo, slot) => save(store, signature, 'withdraw', '1', secondsAgo, slot, 'wallet', fee);
@@ -26,15 +26,17 @@ test('fee totals use exact request fees and period boundaries, without counting 
     withdraw('legacy-unknown-time', null, null, 11);
     withdraw('zero-fee', '0', 60, 12);
     save(store, 'refunded', 'refund', '1', 60, 13, 'wallet', '9007199254740993');
-    save(store, 'mint', 'mint', '1000000000000', 60, 14, 'wallet', '999');
+    save(store, 'mint', 'mint', '1000000000000', 60, 14, 'wallet', null, '5');
+    save(store, 'before-activation', 'mint', '1000000000000', 60, 15, 'wallet', null, '0');
+    save(store, 'event-fee-is-not-a-treasury-receipt', 'withdraw', '1', 60, 16, 'wallet', '999', '0');
     store.set('price', { usd: '1' });
-    const expected = { '8h': ['9007199254740994', 1], '24h': ['9007199254741000', 1], '7d': ['9007199254741024', 1], all: ['9007199254741248', 2] };
+    const expected = { '8h': ['9007199254740999', 1], '24h': ['9007199254741005', 1], '7d': ['9007199254741029', 1], all: ['9007199254741253', 2] };
     for (const window of store.stats(now)) {
       assert.deepEqual([window.feesAtomic, window.feesUnreported], expected[window.id], window.id);
       assert.equal(window.feesUsd, '9007.20', window.id);
     }
-    assert.equal(store.stats(now)[0].fees, '9007.199254740994');
-    assert.equal(store.stats(now + 5000)[0].feesAtomic, '9007199254741121', 'fee leaves at the rolling boundary and future request enters');
+    assert.equal(store.stats(now)[0].fees, '9007.199254740999');
+    assert.equal(store.stats(now + 5000)[0].feesAtomic, '9007199254741126', 'fee leaves at the rolling boundary and future request enters');
   } finally { store.close(); }
 });
 test('USD fee estimates update with the cached price and stay unavailable until a price is known', () => {
@@ -54,6 +56,31 @@ test('USD fee estimates update with the cached price and stay unavailable until 
     store.set('priceError', null);
     store.set('price', { usd: '200', checkedAt: new Date(Date.now() - 301000).toISOString() });
     assert.equal(store.status().price.stale, true);
+  } finally { store.close(); }
+});
+test('counts treasury receipts once per transaction across multiple bridge events and exposes unverified transactions', () => {
+  const store = new Store(':memory:');
+  try {
+    const entry = { signature: 'batched', slot: 1, blockTime: now / 1000 - 60, err: null };
+    const events = [
+      { index: 1, type: 'mint', owner: 'wallet', pda: 'deposit', amountAtomic: '1000' },
+      { index: 2, type: 'mint', owner: 'wallet', pda: 'deposit', amountAtomic: '2000' },
+      { index: 3, type: 'withdraw', owner: 'wallet', pda: 'withdrawal', amountAtomic: '3000', feeAtomic: '999' },
+    ];
+    store.enqueue([entry]);
+    store.save({ ...entry, block_time: entry.blockTime }, events);
+    assert.equal(store.stats(now)[0].feesUnreported, 1);
+    assert.equal(store.stats(now)[0].feesAtomic, '0', 'no fallback to an emitted fee or fixed rate');
+    for (let i = 0; i < 2; i++) store.save({ ...entry, block_time: entry.blockTime }, events, '100');
+    save(store, 'treasury-payout', 'mint', '1', 60, 2, 'wallet', null, '-50');
+    save(store, 'refunded', 'refund', '3000', 60, 3, 'wallet', '999');
+    store.save({ signature: 'unrelated-transfer', slot: 4, block_time: now / 1000 - 60 }, [], '99999');
+    assert.equal(store.stats(now)[0].feesAtomic, '100');
+    assert.equal(store.stats(now)[0].feesUnreported, 0);
+    assert.equal(store.stats(now)[0].deposits, 3);
+    assert.equal(store.stats(now)[0].withdrawals, 1);
+    assert.equal(store.list({ search: 'batched' }).events[0].feeDeltaAtomic, '100');
+    assert.equal(store.list({ search: 'batched' }).events[0].feeDelta, '0.0000000001');
   } finally { store.close(); }
 });
 test('volume windows have exact sums, exclude fees, and count creation separately', () => {
@@ -207,5 +234,19 @@ test('event persistence and queue completion roll back together', () => {
     ]));
     assert.equal(store.list().total, 0);
     assert.equal(store.pendingCount(), 1);
+  } finally { store.close(); }
+});
+test('treasury fee records and events roll back if queue completion fails', () => {
+  const store = new Store(':memory:');
+  try {
+    store.enqueue([{ signature: 'broken', slot: 1, blockTime: 1, err: null }]);
+    store.db.exec(`CREATE TRIGGER fail_queue_completion BEFORE UPDATE OF done ON queue
+      BEGIN SELECT RAISE(ABORT, 'queue completion failed'); END`);
+    assert.throws(() => store.save({ signature: 'broken', slot: 1, block_time: 1 }, [
+      { index: 0, type: 'mint', owner: 'wallet', pda: 'record', amountAtomic: '1000' },
+    ], '10'), /queue completion failed/);
+    assert.equal(store.list().total, 0);
+    assert.equal(store.pendingCount(), 1);
+    assert.equal(store.db.prepare('SELECT count(*) AS n FROM transaction_fees').get().n, 0);
   } finally { store.close(); }
 });

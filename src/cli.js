@@ -25,7 +25,7 @@ const help = `wXMR bridge explorer — terminal by default, no listening port
 Types: create, mint, withdraw (or all). Node.js 22.13+ required.
 Keyboard: 0/1/2/3 filters, / search, n/p pages, ↑↓ select, Enter details, q quit.
 Volumes: minted deposits and net withdrawals; indexed history only.
-Fees: bridge fees in wXMR and estimated USD at the current wXMR market price.
+Fees: deposit + withdrawal treasury receipts in wXMR and estimated USD at the current wXMR market price.
 Users: distinct Solana wallets creating addresses, minting, or requesting withdrawals.
 On-chain supply is read independently at finalized commitment.
 Helius URL goes in the ignored .env as SOLANA_RPC_URL.

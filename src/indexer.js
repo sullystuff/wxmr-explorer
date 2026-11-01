@@ -1,5 +1,6 @@
 import { PROGRAM_ID, MINT_ID, GENESIS_HASH, formatAmount } from './config.js';
 import { decodeLogs } from './events.js';
+import { feeAccountDelta } from './fees.js';
 
 export class Indexer {
   constructor(store, rpc, pollMs = 15000) {
@@ -118,7 +119,9 @@ export class Indexer {
         const tx = transactions[i];
         if (!tx?.meta) throw new Error('Finalized transaction unavailable; will retry');
         if (tx.slot !== entry.slot || tx.transaction?.signatures?.[0] !== entry.signature) throw new Error('Transaction identity mismatch');
-        this.store.save({ ...entry, block_time: tx.blockTime ?? entry.block_time }, tx.meta.err ? [] : decodeLogs(tx.meta.logMessages));
+        const events = tx.meta.err ? [] : decodeLogs(tx.meta.logMessages);
+        const feeDelta = events.some(event => ['mint', 'withdraw'].includes(event.type)) ? feeAccountDelta(tx) : null;
+        this.store.save({ ...entry, block_time: tx.blockTime ?? entry.block_time }, events, feeDelta);
       } catch (error) { this.store.defer(entry.signature, error.message); }
     }
   }
@@ -126,6 +129,7 @@ export class Indexer {
     try {
       if (!this.verified) await this.verify();
       this.store.prepareEventBackfill();
+      this.store.prepareFeeBackfill();
       if (Date.now() >= this.nextSupplyPoll) {
         try { await this.refreshSupply(); }
         catch (error) { this.store.set('supplyError', error.message); }
