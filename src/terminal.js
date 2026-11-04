@@ -103,12 +103,11 @@ export function terminal(store, options, stop, following = false) {
       const eventWidth = width < 80 ? 16 : 24;
       const usdWidth = 18;
       const amountWidth = Math.min(26, Math.max(18, width - (2 + 15 + ageWidth + eventWidth + usdWidth + (small ? 0 : 30))));
-      lines.push(color('1', `  ${pad('TIME (UTC)', 15)}${ageWidth ? pad('AGE', ageWidth) : ''}${pad('EVENT', eventWidth)}${pad('AMOUNT', amountWidth)}${pad('EST. USD', usdWidth)}${small ? '' : `${pad('WALLET', 18)}TRANSACTION`}`));
+      lines.push(color('1', `  ${pad('TIME (UTC)', 15)}${ageWidth ? pad('AGE', ageWidth) : ''}${pad('EVENT', eventWidth)}${pad('AMOUNT', amountWidth)}${pad('EST. USD', usdWidth)}${small ? '' : `${pad('WALLET', 18)}  TX`}`));
       for (const [i, event] of lastRows.entries()) {
         const amount = event.amount === null ? '—' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`;
         const usd = event.amount === null ? '—' : event.amountUsd == null ? 'unavailable' : `≈ $${event.amountUsd}`;
-        const txWidth = width - (2 + 15 + ageWidth + eventWidth + amountWidth + usdWidth + 18);
-        const line = `${i === selected ? '› ' : '  '}${pad(time(event.blockTime), 15)}${ageWidth ? pad(age(event.blockTime), ageWidth) : ''}${pad(TYPES[event.type].label, eventWidth)}${pad(amount, amountWidth)}${pad(usd, usdWidth)}${small ? '' : `${pad(event.owner, 18)}${short(event.signature, Math.max(12, txWidth))}`}`;
+        const line = `${i === selected ? '› ' : '  '}${pad(time(event.blockTime), 15)}${ageWidth ? pad(age(event.blockTime), ageWidth) : ''}${pad(TYPES[event.type].label, eventWidth)}${pad(amount, amountWidth)}${pad(usd, usdWidth)}${small ? '' : `${pad(event.owner, 18)}  ${short(event.signature, 9)}`}`;
         lines.push(i === selected ? color('38;5;208', line) : line);
       }
       if (!lastRows.length) lines.push(color('90', status.pending ? 'Loading bridge activity…' : 'No matching events indexed yet.'));

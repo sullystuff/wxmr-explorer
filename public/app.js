@@ -9,7 +9,7 @@ let generation = 0;
 let status;
 let timer;
 const $ = id => document.getElementById(id);
-const short = value => `${value.slice(0, 10)}…${value.slice(-6)}`;
+const short = (value, start = 10, end = 6) => value.length <= start + end + 1 ? value : `${value.slice(0, start)}…${value.slice(-end)}`;
 const integer = value => Number(value).toLocaleString();
 
 function node(tag, text, className) {
@@ -97,7 +97,7 @@ function renderRows(result) {
       when.append(node('span', `${date.toLocaleTimeString()} · slot ${integer(event.slot)}`, 'sub'));
     }
     const tx = node('td', undefined, 'tx');
-    tx.append(link(`${short(event.signature)} ↗`, event.txUrl, event.signature));
+    tx.append(link(`${short(event.signature, 4, 4)} ↗`, event.txUrl, event.signature));
     row.append(kind, amount, wallet, when, tx);
     $('events').append(row);
   }
