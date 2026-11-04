@@ -58,6 +58,33 @@ test('USD fee estimates update with the cached price and stay unavailable until 
     assert.equal(store.status().price.stale, true);
   } finally { store.close(); }
 });
+test('activity USD estimates use exact event amounts and the latest cached quote', () => {
+  const store = new Store(':memory:');
+  try {
+    save(store, 'mint', 'mint', '1234567890000', 60, 1);
+    save(store, 'withdraw', 'withdraw', '9007199254740993', 60, 2, 'wallet', '500000000000');
+    save(store, 'create', 'create', null, 60, 3);
+    save(store, 'zero', 'mint', '0', 60, 4);
+    const events = () => Object.fromEntries(store.list().events.map(event => [event.signature, event]));
+    assert.ok(Object.values(events()).every(event => event.amountUsd === null));
+    store.set('price', { usd: '596.87', checkedAt: new Date().toISOString() });
+    let rows = events();
+    assert.equal(rows.mint.amountUsd, '736.88');
+    assert.equal(rows.withdraw.amountUsd, '5376127.02', 'uses the withdrawal amount, excluding its fee');
+    assert.equal(rows.withdraw.amount, '9007.199254740993');
+    assert.equal(rows.create.amountUsd, null, 'address creation has no amount');
+    assert.equal(rows.zero.amountUsd, '0.00');
+    store.set('price', { usd: '1.01', checkedAt: new Date().toISOString() });
+    rows = events();
+    assert.equal(rows.mint.amountUsd, '1.25');
+    assert.equal(rows.withdraw.amountUsd, '9097.27');
+    store.set('priceError', 'Market API unavailable');
+    assert.equal(store.status().price.stale, true);
+    assert.equal(events().withdraw.amountUsd, '9097.27', 'retains the last known valuation with a stale quote');
+    store.set('price', { usd: 'invalid' });
+    assert.ok(Object.values(events()).every(event => event.amountUsd === null));
+  } finally { store.close(); }
+});
 test('counts treasury receipts once per transaction across multiple bridge events and exposes unverified transactions', () => {
   const store = new Store(':memory:');
   try {

@@ -79,7 +79,13 @@ function renderRows(result) {
     kind.append(link(`Record ${short(event.pda)} ↗`, `https://solscan.io/account/${event.pda}`, event.pda));
     kind.lastChild.className = 'sub';
     const amount = node('td', event.amount ?? '—', 'amount');
-    if (event.amount !== null) amount.append(node('span', event.type === 'withdraw' ? 'XMR' : 'wXMR', 'unit'));
+    if (event.amount !== null) {
+      amount.append(node('span', event.type === 'withdraw' ? 'XMR' : 'wXMR', 'unit'));
+      const usd = node('span', event.amountUsd == null ? '(USD unavailable)' : `(≈ $${event.amountUsd} USD${status?.price?.stale ? ' · stale' : ''})`, 'amount-usd');
+      usd.title = 'Estimated using the current wXMR market price';
+      usd.classList.toggle('stale', !!status?.price?.stale);
+      amount.append(usd);
+    }
     if (event.reason) amount.append(node('span', event.reason, 'sub'));
     const wallet = node('td', undefined, 'wallet');
     wallet.append(link(event.owner, `https://solscan.io/account/${event.owner}`));

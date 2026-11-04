@@ -40,7 +40,9 @@ npm start -- stats --json            # Cached volumes, fees, user counts, and in
 npm run sync -- --passes 8           # Bounded sync, about 25 transactions per pass.
 ```
 
-When stdout is redirected, the default dashboard becomes a plain event stream. `--json` emits one event per line. Cached JSON events include full signatures, addresses, `amountAtomic`, and a decimal `amount` string.
+When stdout is redirected, the default dashboard becomes a plain event stream. `--json` emits one event per line. Cached JSON events include full signatures, addresses, `amountAtomic`, a decimal `amount` string, and `amountUsd` (a decimal USD estimate, or `null` without a quote or event amount).
+
+Deposit and withdrawal amounts show estimated USD values beside their XMR/wXMR amounts in web activity, the terminal dashboard and event details, and plain event output. Estimates use the current cached wXMR market price and round to cents, rather than using historical prices. Stale quotes are marked in web activity and the terminal price status; without a quote, USD is unavailable.
 
 ## Optional web UI
 

@@ -123,9 +123,11 @@ export class Store {
       (SELECT delta_atomic FROM transaction_fees WHERE signature=events.signature) AS fee_delta_atomic
       FROM events ${where} ORDER BY slot DESC,signature,log_index DESC LIMIT ? OFFSET ?`)
       .all(...params, limit, offset);
+    const price = this.get('price')?.usd ?? null;
     return { total, events: rows.map(row => ({
       ...JSON.parse(row.data), id: row.id, signature: row.signature, slot: row.slot,
       blockTime: row.block_time, amount: row.amount_atomic === null ? null : formatAmount(row.amount_atomic),
+      amountUsd: row.amount_atomic === null ? null : feesUsd(row.amount_atomic, price),
       feeDeltaAtomic: row.fee_delta_atomic, feeDelta: row.fee_delta_atomic === null ? null : formatAmount(row.fee_delta_atomic),
       txUrl: `https://solscan.io/tx/${row.signature}`,
     })) };

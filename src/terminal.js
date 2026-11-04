@@ -19,9 +19,15 @@ function fitLine(line, width) {
 
 export function printEvents(events, output = process.stdout) {
   for (const event of events) {
-    output.write(`${time(event.blockTime)} UTC${event.blockTime === null ? '' : ` (${age(event.blockTime)})`}  ${TYPES[event.type].label}  ${event.amount === null ? '' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`}\n`);
+    output.write(`${time(event.blockTime)} UTC${event.blockTime === null ? '' : ` (${age(event.blockTime)})`}  ${TYPES[event.type].label}  ${event.amount === null ? '' : eventAmount(event)}\n`);
     output.write(`  Wallet: ${event.owner}\n  Record: ${event.pda}\n  Tx: ${event.txUrl}\n`);
   }
+}
+
+function eventAmount(event) {
+  if (event.amount === null) return '—';
+  const usd = event.amountUsd == null ? 'USD unavailable' : `≈ $${event.amountUsd} USD`;
+  return `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'} (${usd})`;
 }
 
 export function supplyLine(status) {
@@ -32,8 +38,8 @@ export function supplyLine(status) {
 
 export function priceLine(status) {
   const price = status.price;
-  if (!price) return 'Fee USD estimates: unavailable · awaiting wXMR market price';
-  return `Fee USD estimates: $${price.usd}/wXMR · ${price.source}${price.stale ? ' · STALE' : ''} · ${relativeTime(Date.parse(price.checkedAt))}`;
+  if (!price) return 'USD estimates: unavailable · awaiting wXMR market price';
+  return `USD estimates: $${price.usd}/wXMR · ${price.source}${price.stale ? ' · STALE' : ''} · ${relativeTime(Date.parse(price.checkedAt))}`;
 }
 
 export function feeLine(window) {
@@ -84,19 +90,25 @@ export function terminal(store, options, stop, following = false) {
       const event = lastRows[selected];
       lines.splice(1);
       lines.push('', color('1', TYPES[event.type].label), `Time: ${time(event.blockTime)} UTC${event.blockTime === null ? '' : ` · ${age(event.blockTime)}`} · slot ${event.slot}`,
-        `Amount: ${event.amount === null ? '—' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`}`,
+        `Amount: ${eventAmount(event)}`,
         `Wallet: ${event.owner}`, `Record: ${event.pda}`, `Signature: ${event.signature}`, `Solscan: ${event.txUrl}`);
+      if (event.amount !== null) lines.push(priceLine(status));
       if (event.xmrAddress) lines.push(`XMR destination: ${event.xmrAddress}`, `Fee: ${event.feeAtomic === null ? 'not reported by legacy event' : `${formatAmount(event.feeAtomic)} wXMR`}`);
       if (['mint', 'withdraw'].includes(event.type)) lines.push(`Fee treasury delta (transaction): ${event.feeDelta === null ? 'awaiting verification' : `${event.feeDelta} wXMR`}`);
       if (event.reason) lines.push(`Reason: ${event.reason}`);
       lines.push('', 'Esc / Enter: back to activity');
     } else {
-      const small = width < 90;
-      const amountWidth = Math.min(26, Math.max(18, width - (small ? 50 : 82)));
-      lines.push(color('1', `  ${pad('TIME (UTC)', 15)}${pad('AGE', 10)}${pad('EVENT', 24)}${pad('AMOUNT', amountWidth)}${small ? '' : `${pad('WALLET', 18)}TRANSACTION`}`));
+      const small = width < 120;
+      const ageWidth = width < 100 ? 0 : 10;
+      const eventWidth = width < 80 ? 16 : 24;
+      const usdWidth = 18;
+      const amountWidth = Math.min(26, Math.max(18, width - (2 + 15 + ageWidth + eventWidth + usdWidth + (small ? 0 : 30))));
+      lines.push(color('1', `  ${pad('TIME (UTC)', 15)}${ageWidth ? pad('AGE', ageWidth) : ''}${pad('EVENT', eventWidth)}${pad('AMOUNT', amountWidth)}${pad('EST. USD', usdWidth)}${small ? '' : `${pad('WALLET', 18)}TRANSACTION`}`));
       for (const [i, event] of lastRows.entries()) {
         const amount = event.amount === null ? '—' : `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'}`;
-        const line = `${i === selected ? '› ' : '  '}${pad(time(event.blockTime), 15)}${pad(age(event.blockTime), 10)}${pad(TYPES[event.type].label, 24)}${pad(amount, amountWidth)}${small ? '' : `${pad(event.owner, 18)}${short(event.signature, Math.max(12, width - 69 - amountWidth))}`}`;
+        const usd = event.amount === null ? '—' : event.amountUsd == null ? 'unavailable' : `≈ $${event.amountUsd}`;
+        const txWidth = width - (2 + 15 + ageWidth + eventWidth + amountWidth + usdWidth + 18);
+        const line = `${i === selected ? '› ' : '  '}${pad(time(event.blockTime), 15)}${ageWidth ? pad(age(event.blockTime), ageWidth) : ''}${pad(TYPES[event.type].label, eventWidth)}${pad(amount, amountWidth)}${pad(usd, usdWidth)}${small ? '' : `${pad(event.owner, 18)}${short(event.signature, Math.max(12, txWidth))}`}`;
         lines.push(i === selected ? color('38;5;208', line) : line);
       }
       if (!lastRows.length) lines.push(color('90', status.pending ? 'Loading bridge activity…' : 'No matching events indexed yet.'));
