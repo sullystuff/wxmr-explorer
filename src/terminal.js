@@ -24,10 +24,14 @@ export function printEvents(events, output = process.stdout) {
   }
 }
 
+function usdEstimate(value) {
+  if (value == null) return 'USD unavailable';
+  return `≈ ${value.startsWith('-') ? `-$${value.slice(1)}` : `$${value}`} USD`;
+}
+
 function eventAmount(event) {
   if (event.amount === null) return '—';
-  const usd = event.amountUsd == null ? 'USD unavailable' : `≈ $${event.amountUsd} USD`;
-  return `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'} (${usd})`;
+  return `${event.amount} ${event.type === 'withdraw' ? 'XMR' : 'wXMR'} (${usdEstimate(event.amountUsd)})`;
 }
 
 export function supplyLine(status) {
@@ -94,7 +98,7 @@ export function terminal(store, options, stop, following = false) {
         `Wallet: ${event.owner}`, `Record: ${event.pda}`, `Signature: ${event.signature}`, `Solscan: ${event.txUrl}`);
       if (event.amount !== null) lines.push(priceLine(status));
       if (event.xmrAddress) lines.push(`XMR destination: ${event.xmrAddress}`, `Fee: ${event.feeAtomic === null ? 'not reported by legacy event' : `${formatAmount(event.feeAtomic)} wXMR`}`);
-      if (['mint', 'withdraw'].includes(event.type)) lines.push(`Fee treasury delta (transaction): ${event.feeDelta === null ? 'awaiting verification' : `${event.feeDelta} wXMR`}`);
+      if (['mint', 'withdraw'].includes(event.type)) lines.push(`Fee treasury delta (transaction): ${event.feeDelta === null ? 'awaiting verification' : `${event.feeDelta} wXMR (${usdEstimate(event.feeDeltaUsd)})`}`);
       if (event.reason) lines.push(`Reason: ${event.reason}`);
       lines.push('', 'Esc / Enter: back to activity');
     } else {

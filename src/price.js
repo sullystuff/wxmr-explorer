@@ -3,13 +3,14 @@ import { MINT_ID } from './config.js';
 export const PRICE_MAX_AGE_MS = 5 * 60000;
 const validPrice = value => typeof value === 'string' && /^\d{1,18}(?:\.\d{1,18})?$/.test(value) && BigInt(value.replace('.', '')) > 0n;
 
-// Convert the exact atomic sum to cents, rounding only the final USD value.
+// Convert the exact signed atomic amount to cents, rounding only the final USD value.
 export function feesUsd(amountAtomic, price) {
   if (!validPrice(price)) return null;
+  const amount = BigInt(amountAtomic);
   const [whole, fraction = ''] = price.split('.');
   const scale = 1000000000000n * 10n ** BigInt(fraction.length);
-  const cents = (BigInt(amountAtomic) * BigInt(whole + fraction) * 100n + scale / 2n) / scale;
-  return `${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`;
+  const cents = ((amount < 0n ? -amount : amount) * BigInt(whole + fraction) * 100n + scale / 2n) / scale;
+  return `${amount < 0n && cents !== 0n ? '-' : ''}${cents / 100n}.${(cents % 100n).toString().padStart(2, '0')}`;
 }
 
 export class PriceFeed {

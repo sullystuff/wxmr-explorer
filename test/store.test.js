@@ -85,6 +85,34 @@ test('activity USD estimates use exact event amounts and the latest cached quote
     assert.ok(Object.values(events()).every(event => event.amountUsd === null));
   } finally { store.close(); }
 });
+test('treasury delta USD estimates preserve signed verified amounts and follow the cached quote', () => {
+  const store = new Store(':memory:');
+  try {
+    save(store, 'mint', 'mint', '1000000000000', 60, 1, 'wallet', '999', '1867500000');
+    save(store, 'negative', 'withdraw', '1000000000000', 60, 2, 'wallet', '999', '-1867500000');
+    save(store, 'zero', 'mint', '1000000000000', 60, 3, 'wallet', null, '0');
+    save(store, 'unverified', 'withdraw', '1000000000000', 60, 4, 'wallet', '999', null);
+    save(store, 'create', 'create', null, 60, 5);
+    const events = () => Object.fromEntries(store.list().events.map(event => [event.signature, event]));
+    assert.ok(Object.values(events()).every(event => event.feeDeltaUsd === null));
+    store.set('price', { usd: '596.87', checkedAt: new Date().toISOString() });
+    const rows = events();
+    assert.equal(rows.mint.feeDeltaUsd, '1.11', 'values the measured treasury delta, not the event fee');
+    assert.equal(rows.negative.feeDeltaUsd, '-1.11');
+    assert.equal(rows.negative.feeDelta, '-0.0018675');
+    assert.equal(rows.zero.feeDeltaUsd, '0.00');
+    assert.equal(rows.unverified.feeDeltaUsd, null);
+    assert.equal(rows.create.feeDeltaUsd, null);
+    store.set('price', { usd: '200', checkedAt: new Date().toISOString() });
+    assert.equal(events().mint.feeDeltaUsd, '0.37');
+    assert.equal(events().negative.feeDeltaUsd, '-0.37');
+    store.set('priceError', 'Market API unavailable');
+    assert.equal(store.status().price.stale, true);
+    assert.equal(events().mint.feeDeltaUsd, '0.37');
+    store.set('price', { usd: 'invalid' });
+    assert.ok(Object.values(events()).every(event => event.feeDeltaUsd === null));
+  } finally { store.close(); }
+});
 test('counts treasury receipts once per transaction across multiple bridge events and exposes unverified transactions', () => {
   const store = new Store(':memory:');
   try {

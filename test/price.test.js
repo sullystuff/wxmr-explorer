@@ -12,6 +12,10 @@ test('USD conversion rounds the exact total to cents without floating-point loss
   assert.equal(feesUsd('4999999999', '1'), '0.00');
   assert.equal(feesUsd('1', '0.000000000000000001'), '0.00');
   assert.equal(feesUsd('9007199254740993000000000000', '1.01'), '9097271247288402.93');
+  assert.equal(feesUsd('-1234567890000', '596.87'), '-736.88');
+  assert.equal(feesUsd('-5000000000', '1'), '-0.01');
+  assert.equal(feesUsd('-4999999999', '1'), '0.00');
+  assert.equal(feesUsd('-9007199254740993000000000000', '1.01'), '-9097271247288402.93');
   for (const price of [null, undefined, '', '0', 'NaN', 'Infinity', '-1', '1e3', 596.87]) {
     assert.equal(feesUsd('1', price), null);
   }

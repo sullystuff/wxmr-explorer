@@ -44,6 +44,8 @@ When stdout is redirected, the default dashboard becomes a plain event stream. `
 
 Deposit and withdrawal amounts show estimated USD values beside their XMR/wXMR amounts in web activity, the terminal dashboard and event details, and plain event output. Estimates use the current cached wXMR market price and round to cents, rather than using historical prices. Stale quotes are marked in web activity and the terminal price status; without a quote, USD is unavailable.
 
+Terminal event details also show the fee treasury delta in wXMR and estimated USD. Activity JSON includes `feeDeltaUsd`, the signed USD estimate of the transaction's verified treasury change, or `null` without a quote or verified delta.
+
 ## Optional web UI
 
 ```sh

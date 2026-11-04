@@ -129,6 +129,7 @@ export class Store {
       blockTime: row.block_time, amount: row.amount_atomic === null ? null : formatAmount(row.amount_atomic),
       amountUsd: row.amount_atomic === null ? null : feesUsd(row.amount_atomic, price),
       feeDeltaAtomic: row.fee_delta_atomic, feeDelta: row.fee_delta_atomic === null ? null : formatAmount(row.fee_delta_atomic),
+      feeDeltaUsd: row.fee_delta_atomic === null ? null : feesUsd(row.fee_delta_atomic, price),
       txUrl: `https://solscan.io/tx/${row.signature}`,
     })) };
   }
