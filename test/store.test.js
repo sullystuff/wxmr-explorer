@@ -8,6 +8,66 @@ function save(store, signature, type, amountAtomic, secondsAgo, slot, owner = 'w
   store.enqueue([entry]);
   store.save({ ...entry, block_time: entry.blockTime }, [{ index: 1, type, owner, pda: 'record', feeAtomic, ...(amountAtomic ? { amountAtomic } : {}) }], feeDeltaAtomic);
 }
+test('exact wallet filters compose with type, search and pagination without matching other event fields', () => {
+  const store = new Store(':memory:');
+  try {
+    save(store, 'first', 'withdraw', '1', 60, 1, 'wallet');
+    save(store, 'second', 'withdraw', '2', 60, 2, 'wallet');
+    save(store, 'mint', 'mint', '3', 60, 3, 'wallet');
+    save(store, 'wallet', 'withdraw', '4', 60, 4, 'wallet-extra');
+    save(store, 'different-case', 'withdraw', '5', 60, 5, 'Wallet');
+    save(store, 'refund', 'refund', '1', 60, 6, 'wallet');
+    const page = store.list({ owner: 'wallet', type: 'withdraw', limit: 1, offset: 1 });
+    assert.equal(page.total, 2);
+    assert.deepEqual(page.events.map(event => event.signature), ['first']);
+    assert.equal(store.list({ owner: 'wallet', type: 'withdraw', search: 'second' }).total, 1);
+    assert.equal(store.list({ owner: 'wallet', search: 'wallet-extra' }).total, 0);
+    assert.equal(store.list({ owner: 'wallet' }).total, 3);
+    assert.equal(store.list({ owner: 'missing' }).total, 0);
+    assert.equal(store.list().total, 5);
+  } finally { store.close(); }
+});
+test('wallet statistics isolate owners, preserve rolling windows, exact amounts, refunds and transaction fee deduplication', () => {
+  const store = new Store(':memory:');
+  try {
+    save(store, 'withdraw', 'withdraw', '9007199254740993', 60, 1, 'wallet', '100000000000');
+    const entry = { signature: 'mixed', slot: 2, blockTime: now / 1000 - 60, err: null };
+    store.enqueue([entry]);
+    store.save({ ...entry, block_time: entry.blockTime }, [
+      { index: 0, type: 'mint', owner: 'wallet', pda: 'record', amountAtomic: '1000000000000' },
+      { index: 1, type: 'mint', owner: 'wallet', pda: 'record', amountAtomic: '2000000000000' },
+    ], '200000000000');
+    save(store, 'refund', 'refund', '1000000000000', 60, 3, 'wallet');
+    save(store, 'create', 'create', null, 60, 4, 'wallet');
+    save(store, 'old', 'withdraw', '2000000000000', 8 * 3600 + 1, 5, 'wallet', '0');
+    save(store, 'unknown-time', 'withdraw', '3000000000000', null, 6, 'wallet');
+    save(store, 'other-owner', 'withdraw', '4000000000000', 60, 7, 'wallet-extra', '1000000000000');
+    store.set('price', { usd: '100' });
+    const stats = store.stats(now, { owner: 'wallet' });
+    const recent = stats[0];
+    assert.equal(recent.depositedAtomic, '3000000000000');
+    assert.equal(recent.withdrawalRequestedAtomic, '9007199254740993');
+    assert.equal(recent.withdrawalRequested, '9007.199254740993');
+    assert.equal(recent.withdrawnAtomic, '9006199254740993');
+    assert.equal(recent.withdrawals, 1);
+    assert.equal(recent.deposits, 2);
+    assert.equal(recent.activityEvents, 4);
+    assert.equal(recent.uniqueUsers, 1);
+    assert.equal(recent.fees, '0.3');
+    assert.equal(recent.feesUsd, '30.00');
+    assert.equal(stats[1].withdrawals, 2);
+    assert.equal(stats[3].withdrawals, 3);
+    assert.equal(stats[3].feesUnreported, 1);
+    assert.equal(store.stats(now)[0].withdrawals, 2, 'global cache cannot reuse wallet totals');
+    assert.equal(store.stats(now, { owner: 'wallet-extra' })[0].withdrawals, 1);
+    assert.equal(store.stats(now, { owner: 'wallet' })[0].withdrawals, 1);
+    assert.equal(store.stats(now, { owner: 'missing' })[3].activityEvents, 0);
+    store.set('price', { usd: '200' });
+    assert.equal(store.stats(now, { owner: 'wallet' })[0].feesUsd, '60.00');
+    save(store, 'new', 'withdraw', '1', 60, 8, 'wallet', '0');
+    assert.equal(store.stats(now, { owner: 'wallet' })[0].withdrawals, 2, 'new activity invalidates wallet statistics');
+  } finally { store.close(); }
+});
 test('fee totals use exact deposit and withdrawal treasury deltas and period boundaries, without counting refunds twice', () => {
   const store = new Store(':memory:');
   try {

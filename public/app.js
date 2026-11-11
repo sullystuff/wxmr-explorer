@@ -4,6 +4,8 @@ const labels = { create: 'Deposit address created', mint: 'Mint deposit', withdr
 let period = '24h';
 let type = '';
 let search = '';
+let owner = '';
+let walletPeriod = 'all';
 let offset = 0;
 let generation = 0;
 let status;
@@ -70,6 +72,39 @@ function renderStats() {
     button.setAttribute('aria-pressed', String(button.dataset.window === period));
   }
 }
+function renderWallet() {
+  $('wallet-summary').hidden = !owner;
+  if (!owner) return;
+  $('wallet-address').textContent = owner;
+  $('wallet-address').href = `https://solscan.io/account/${owner}`;
+  const stats = status?.wallet?.owner === owner ? status.wallet.stats.find(window => window.id === walletPeriod) : null;
+  $('wallet-loading').hidden = !!stats;
+  $('wallet-stats').hidden = !stats;
+  for (const button of $('wallet-windows').querySelectorAll('button')) {
+    button.classList.toggle('active', button.dataset.window === walletPeriod);
+    button.setAttribute('aria-pressed', String(button.dataset.window === walletPeriod));
+  }
+  if (!stats) return;
+  $('wallet-deposited').textContent = stats.deposited;
+  $('wallet-deposit-count').textContent = `${integer(stats.deposits)} mints · ${integer(stats.creates)} addresses created`;
+  $('wallet-withdrawn').textContent = stats.withdrawn;
+  $('wallet-withdraw-count').textContent = `${integer(stats.withdrawals)} requests · ${stats.withdrawalRequested} XMR requested`;
+  $('wallet-net-flow').textContent = stats.netFlow;
+  $('wallet-activity-count').textContent = `${integer(stats.activityEvents)} activity events`;
+  $('wallet-fees').textContent = stats.fees;
+  $('wallet-fees-usd').textContent = stats.feesUsd === null ? 'USD unavailable' : `≈ $${stats.feesUsd}${status.price?.stale ? ' · stale quote' : ''}`;
+  $('wallet-fee-coverage').textContent = stats.feesUnreported ? `Excludes ${integer(stats.feesUnreported)} transactions awaiting fee verification` : 'Deposit + withdrawal transaction fees';
+}
+function selectWallet(address, eventType) {
+  owner = address;
+  selectType(eventType);
+  clearTimeout(debounce);
+  search = '';
+  $('search').value = '';
+  offset = 0;
+  renderWallet();
+  refresh();
+}
 function renderRows(result) {
   $('events').replaceChildren();
   for (const event of result.events) {
@@ -89,6 +124,12 @@ function renderRows(result) {
     if (event.reason) amount.append(node('span', event.reason, 'sub'));
     const wallet = node('td', undefined, 'wallet');
     wallet.append(link(event.owner, `https://solscan.io/account/${event.owner}`));
+    const filter = node('button', owner === event.owner ? 'Wallet selected' : 'Filter wallet', 'wallet-filter');
+    filter.type = 'button';
+    filter.disabled = owner === event.owner;
+    filter.setAttribute('aria-label', `Filter activity and show statistics for wallet ${event.owner}`);
+    filter.addEventListener('click', () => selectWallet(event.owner, event.type));
+    wallet.append(filter);
     const date = event.blockTime === null ? null : new Date(event.blockTime * 1000);
     const when = node('td', date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown time');
     if (date) {
@@ -118,13 +159,14 @@ async function refresh() {
   clearTimeout(timer);
   const request = ++generation;
   try {
-    const params = new URLSearchParams({ type, search, offset, limit: 50 });
-    const responses = await Promise.all([fetch('/api/status'), fetch(`/api/events?${params}`)]);
+    const params = new URLSearchParams({ type, owner, search, offset, limit: 50 });
+    const responses = await Promise.all([fetch(`/api/status?${new URLSearchParams({ owner })}`), fetch(`/api/events?${params}`)]);
     if (responses.some(response => !response.ok)) throw new Error('Explorer API unavailable');
     const [nextStatus, result] = await Promise.all(responses.map(response => response.json()));
     if (request !== generation) return;
     status = nextStatus;
     renderStats();
+    renderWallet();
     renderRows(result);
     $('sync').textContent = status.lastSync ? `Synced ${new Date(status.lastSync).toLocaleTimeString()}` : 'Connecting to Helius…';
     if (status.lastSync) $('sync').append(' · ', relativeDate(new Date(status.lastSync)));
@@ -143,14 +185,21 @@ async function refresh() {
 $('windows').addEventListener('click', event => {
   if (event.target.dataset.window) { period = event.target.dataset.window; renderStats(); }
 });
-$('filters').addEventListener('click', event => {
-  if (!Object.hasOwn(event.target.dataset, 'type')) return;
-  type = event.target.dataset.type;
-  offset = 0;
+$('wallet-windows').addEventListener('click', event => {
+  if (event.target.dataset.window) { walletPeriod = event.target.dataset.window; renderWallet(); }
+});
+$('clear-wallet').addEventListener('click', () => { owner = ''; offset = 0; renderWallet(); refresh(); });
+function selectType(nextType) {
+  type = nextType;
   for (const button of $('filters').querySelectorAll('button')) {
     button.classList.toggle('active', button.dataset.type === type);
     button.setAttribute('aria-pressed', String(button.dataset.type === type));
   }
+}
+$('filters').addEventListener('click', event => {
+  if (!Object.hasOwn(event.target.dataset, 'type')) return;
+  selectType(event.target.dataset.type);
+  offset = 0;
   refresh();
 });
 let debounce;

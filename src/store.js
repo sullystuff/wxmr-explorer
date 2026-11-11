@@ -110,11 +110,12 @@ export class Store {
     });
     this.statsCache = null;
   }
-  list({ type = '', search = '', limit = 50, offset = 0 } = {}) {
+  list({ type = '', owner = '', search = '', limit = 50, offset = 0 } = {}) {
     // Keep accounting-only events out of both activity rows and pagination totals.
     const clauses = [`type IN (${ACTIVITY_TYPES.map(() => '?').join(',')})`];
     const params = [...ACTIVITY_TYPES];
     if (type) { clauses.push('type=?'); params.push(type); }
+    if (owner) { clauses.push('owner=?'); params.push(owner); }
     if (search) {
       clauses.push('(instr(owner,?)>0 OR instr(signature,?)>0 OR instr(pda,?)>0 OR instr(data,?)>0)');
       params.push(search, search, search, search);
@@ -158,11 +159,11 @@ export class Store {
       lastSync: this.get('lastSync'), error: this.get('error'), historyGap: this.get('historyGap'),
     };
   }
-  stats(now = Date.now()) {
+  stats(now = Date.now(), { owner = '' } = {}) {
     const interval = Math.floor(now / 5000);
     const version = this.db.prepare('PRAGMA data_version').get().data_version;
     const price = this.get('price')?.usd ?? null;
-    if (this.statsCache && this.statsCache.interval === interval && this.statsCache.version === version && this.statsCache.price === price) return this.statsCache.value;
+    if (this.statsCache && this.statsCache.interval === interval && this.statsCache.version === version && this.statsCache.price === price && this.statsCache.owner === owner) return this.statsCache.value;
     const windows = [
       ['8h', '8 hours', 8 * 3600], ['24h', '24 hours', 24 * 3600],
       ['7d', '7 days', 7 * 86400], ['all', 'All indexed', null],
@@ -173,7 +174,8 @@ export class Store {
       users: new Set(), depositors: new Set(), withdrawers: new Set(),
     }));
     for (const row of this.db.prepare(`SELECT e.type,e.owner,e.amount_atomic,e.block_time,e.signature,f.delta_atomic
-      FROM events e LEFT JOIN transaction_fees f ON f.signature=e.signature`).all()) {
+      FROM events e LEFT JOIN transaction_fees f ON f.signature=e.signature
+      ${owner ? 'WHERE e.owner=?' : ''}`).all(...(owner ? [owner] : []))) {
       for (const window of windows) {
         if (window.from !== null && (row.block_time === null || row.block_time < window.from || row.block_time > now / 1000)) continue;
         if (ACTIVITY_TYPES.includes(row.type)) window.users.add(row.owner);
@@ -196,13 +198,14 @@ export class Store {
       uniqueUsers: window.users.size, uniqueDepositors: window.depositors.size, uniqueWithdrawers: window.withdrawers.size,
       activityEvents: window.creates + window.deposits + window.withdrawals,
       depositedAtomic: window.deposited.toString(), withdrawnAtomic: (window.withdrawn - window.refunded).toString(),
+      withdrawalRequestedAtomic: window.withdrawn.toString(), withdrawalRequested: formatAmount(window.withdrawn),
       refundedAtomic: window.refunded.toString(),
       feesAtomic: window.fees.toString(), fees: formatAmount(window.fees),
       feesUsd: feesUsd(window.fees, price), feesUnreported: window.feesUnreported,
       deposited: formatAmount(window.deposited), withdrawn: formatAmount(window.withdrawn - window.refunded), refunded: formatAmount(window.refunded),
       netFlow: formatAmount(window.deposited - window.withdrawn + window.refunded),
     }));
-    this.statsCache = { interval, version, price, value };
+    this.statsCache = { interval, version, price, owner, value };
     return value;
   }
   close() { this.db.close(); }

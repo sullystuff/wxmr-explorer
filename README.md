@@ -27,16 +27,20 @@ The terminal dashboard refreshes automatically and shows the **current on-chain 
 | `/` | Search wallet, deposit/withdrawal record, XMR destination, or transaction |
 | `n`, `p` | Older/newer page |
 | `↑`, `↓`, Enter | Select an event and show its full details |
+| `w` | Filter to the selected event's exact wallet and event type; show that wallet's statistics (also works in details) |
+| `c` | Clear the wallet filter and restore global statistics; keep the event type |
 | Escape | Close details or clear search |
 | `q`, Ctrl-C | Quit |
 
 ```sh
 npm start -- --type mint
 npm start -- --search SOLANA_WALLET
+npm start -- --owner SOLANA_WALLET --type withdraw
 npm start -- --json                  # Live JSONL; also works without a TTY.
 npm run events -- --limit 50         # Cached activity; makes no RPC calls.
 npm run events -- --type withdraw --json
 npm start -- stats --json            # Cached volumes, fees, user counts, and indexing status.
+npm start -- stats --owner SOLANA_WALLET --json # Statistics for one exact wallet.
 npm run sync -- --passes 8           # Bounded sync, about 25 transactions per pass.
 ```
 
@@ -53,6 +57,10 @@ npm run web
 ```
 
 Open **http://127.0.0.1:3100** for the same activity, filters, search, pagination, and statistics periods, including unique wallet counts and total activity events. Timestamps show relative ages alongside exact dates and times; the relative labels update every second, including when the API is unavailable. The web view refreshes every five seconds. No frontend build is necessary. `HOST` and `PORT` can be changed in `.env`.
+
+Click **Filter wallet** beside an event's wallet to show only that wallet's events of the same type. For example, filtering a withdrawal shows only withdrawals from that account. The wallet summary shows minted deposits, withdrawal requests and requested volume, net withdrawal volume, net flow, activity counts, and bridge fees. Choose **8h, 24h, 7d, or All indexed** independently for wallet statistics; the initial wallet period is All indexed. Statistics cover all event types for that wallet, while event type buttons and search narrow the activity list. **Clear wallet filter** returns to all wallets while keeping the event type. Selecting a wallet clears any text search and returns to the first page.
+
+The terminal's `w` shortcut shows the same wallet's volume, request counts, deposits, fees, and activity across all four periods. `--owner ADDRESS` also works with cached `events`, cached `stats`, and live output. Wallet filtering is an exact, case-sensitive match on the Solana owner address. Wallet fees count each involving transaction's treasury receipt once; a transaction involving multiple wallets can appear in each wallet's fee statistics. Global bridge statistics and on-chain supply remain independent of the browser's wallet filter. `/api/events?owner=ADDRESS` filters activity; `/api/status?owner=ADDRESS` includes the wallet's periods in `wallet.stats` alongside global `stats`.
 
 The terminal and web UI can run together: the first process indexes history, and additional views follow its local cache. If the writer exits, restart a view to resume indexing. Only the optional web command opens a listening port.
 

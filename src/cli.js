@@ -15,6 +15,7 @@ const help = `wXMR bridge explorer — terminal by default, no listening port
   npm start                         Live terminal dashboard
   npm start -- --type mint           Start with mint filter
   npm start -- --search ADDRESS      Filter by wallet, record, destination or tx
+  npm start -- --owner ADDRESS       Exact wallet filter, including statistics
   npm start -- --json                Stream newly indexed events as JSONL
   npm run web                       Optional browser UI at localhost:3100
   npm run sync -- --passes 8         Bounded history sync (25 tx per pass)
@@ -23,7 +24,7 @@ const help = `wXMR bridge explorer — terminal by default, no listening port
   npm start -- stats --json          Cached 8h / 24h / 7d / all statistics
 
 Types: create, mint, withdraw (or all). Node.js 22.13+ required.
-Keyboard: 0/1/2/3 filters, / search, n/p pages, ↑↓ select, Enter details, q quit.
+Keyboard: 0/1/2/3 filters, w selected wallet, c clear wallet, / search, n/p pages, ↑↓ select, Enter details, q quit.
 Volumes: minted deposits and net withdrawals; indexed history only.
 Fees: deposit + withdrawal treasury receipts in wXMR and estimated USD at the current wXMR market price.
 Users: distinct Solana wallets creating addresses, minting, or requesting withdrawals.
@@ -34,7 +35,7 @@ Helius URL goes in the ignored .env as SOLANA_RPC_URL.
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: {
     help: { type: 'boolean', short: 'h' }, json: { type: 'boolean' },
-    type: { type: 'string' }, search: { type: 'string' },
+    type: { type: 'string' }, search: { type: 'string' }, owner: { type: 'string' },
     limit: { type: 'string', default: '50' }, passes: { type: 'string', default: '8' },
   } });
   if (values.help) { console.log(help); return; }
@@ -57,17 +58,18 @@ async function main() {
   };
   try {
     if (command === 'events') {
-      const result = store.list({ type, search: values.search || '', limit });
+      const result = store.list({ type, owner: values.owner || '', search: values.search || '', limit });
       if (values.json) console.log(JSON.stringify(result, null, 2));
       else { printEvents(result.events); console.log(`${result.events.length} of ${result.total} cached events`); }
       return;
     }
     if (command === 'stats') {
-      if (values.json) console.log(JSON.stringify({ stats: store.stats(), status: store.status() }, null, 2));
+      if (values.json) console.log(JSON.stringify({ ...(values.owner ? { owner: values.owner } : {}), stats: store.stats(Date.now(), { owner: values.owner }), status: store.status() }, null, 2));
       else {
+        if (values.owner) console.log(`Wallet: ${values.owner}`);
         console.log(supplyLine(store.status()));
         console.log(priceLine(store.status()));
-        for (const window of store.stats()) {
+        for (const window of store.stats(Date.now(), { owner: values.owner })) {
           console.log(`${window.label}: deposits ${window.deposited} wXMR · net withdrawals ${window.withdrawn} XMR · indexed net flow ${window.netFlow} XMR`);
           console.log(`  Bridge fees: ${feeLine(window)}`);
           console.log(`  Unique users: ${window.uniqueUsers} · depositors: ${window.uniqueDepositors} · withdrawers: ${window.uniqueWithdrawers} · activity events: ${window.activityEvents}`);
@@ -93,8 +95,8 @@ async function main() {
     if (command === 'web') {
       server = await web(store, settings);
       console.log(`wXMR explorer: http://${settings.host}:${settings.port}${indexer ? '' : ' (following local indexer)'}`);
-    } else if (interactive) cleanup = terminal(store, { type, search: values.search }, stop, !indexer);
-    let seen = new Set(store.list({ limit: 200 }).events.map(e => e.id));
+    } else if (interactive) cleanup = terminal(store, { type, owner: values.owner, search: values.search }, stop, !indexer);
+    let seen = new Set(store.list({ owner: values.owner || '', limit: 200 }).events.map(e => e.id));
     let reportedError = '';
     let initial = true;
     while (!stopping) {
@@ -109,7 +111,7 @@ async function main() {
         }
       }
       if (command === 'live' && !interactive) {
-        const rows = store.list({ type, search: values.search || '', limit: 200 }).events;
+        const rows = store.list({ type, owner: values.owner || '', search: values.search || '', limit: 200 }).events;
         const fresh = rows.filter(e => initial || !seen.has(e.id));
         for (const event of fresh.reverse()) {
           if (values.json) console.log(JSON.stringify(event));

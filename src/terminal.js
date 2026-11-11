@@ -50,39 +50,40 @@ export function feeLine(window) {
   return `${window.fees} wXMR · ${window.feesUsd === null ? 'USD unavailable' : `≈ $${window.feesUsd}`}${window.feesUnreported ? ` · ${window.feesUnreported} tx awaiting fee verification` : ''}`;
 }
 
-export function terminal(store, options, stop, following = false) {
+export function terminal(store, options, stop, following = false, { input = process.stdin, output = process.stdout } = {}) {
   let type = options.type || '';
   let search = options.search || '';
+  let owner = options.owner || '';
   let editing = false;
   let page = 0;
   let selected = 0;
   let details = false;
   let lastRows = [];
-  const out = process.stdout;
+  const out = output;
   const compact = () => (out.rows || 30) < 28;
   const pageSize = () => Math.max(1, (out.rows || 30) - (compact() ? 25 : 29));
   out.write('\x1b[?1049h\x1b[?25l');
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  emitKeypressEvents(process.stdin);
+  input.setRawMode(true);
+  input.resume();
+  emitKeypressEvents(input);
 
   function render() {
     const width = Math.max(40, out.columns || 100);
     const limit = pageSize();
     const status = store.status();
-    const stats = store.stats();
-    const result = store.list({ type, search, limit, offset: page * limit });
+    const stats = store.stats(Date.now(), { owner });
+    const result = store.list({ type, owner, search, limit, offset: page * limit });
     lastRows = result.events;
     selected = Math.min(selected, Math.max(0, lastRows.length - 1));
     const column = Math.max(15, Math.min(29, Math.floor((width - 13) / 3)));
     const countLabels = ['USERS', 'DEPOSITORS', 'WITHDRAWERS', 'ADDRESSES', 'MINTS', 'REQUESTS'];
     const lines = [
-      color('1;38;5;208', 'wXMR / bridge explorer') + color('90', `  mainnet · finalized${following ? ' · following local indexer' : ''}`),
+      color('1;38;5;208', `wXMR / bridge explorer${owner ? ' · wallet statistics' : ''}`) + color('90', `  mainnet · finalized${following ? ' · following local indexer' : ''}`),
       color(!status.supply || status.supply.stale || status.supplyError ? '33' : '32', supplyLine(status)),
-      ...(compact() ? [] : [color('90', 'Indexed net flow = minted - net withdrawals; excludes burns outside the bridge'), '']),
+      ...(compact() ? [] : [color('90', owner ? `Wallet: ${owner}` : 'Indexed net flow = minted - net withdrawals; excludes burns outside the bridge'), '']),
       color('1', `${pad('VOLUME', 12)}${pad('MINTED (wXMR)', column)}${pad('NET OUT (XMR)', column)}NET FLOW (XMR)`),
       ...stats.map(window => `${pad(window.label, 12)}${pad(window.deposited, column)}${pad(window.withdrawn, column)}${window.netFlow}`),
-      color('1', 'BRIDGE FEES · DEPOSITS + WITHDRAWALS (wXMR / estimated USD)'),
+      color('1', owner ? 'BRIDGE FEES · WALLET TRANSACTIONS (wXMR / estimated USD)' : 'BRIDGE FEES · DEPOSITS + WITHDRAWALS (wXMR / estimated USD)'),
       ...stats.map(window => `${pad(window.label, 12)}${feeLine(window)}`),
       color(!status.price || status.price.stale ? '33' : '90', priceLine(status)),
       ...(compact() ? [] : [color('90', 'Users, depositors, withdrawers = distinct Solana wallets per period')]),
@@ -100,7 +101,7 @@ export function terminal(store, options, stop, following = false) {
       if (event.xmrAddress) lines.push(`XMR destination: ${event.xmrAddress}`, `Fee: ${event.feeAtomic === null ? 'not reported by legacy event' : `${formatAmount(event.feeAtomic)} wXMR`}`);
       if (['mint', 'withdraw'].includes(event.type)) lines.push(`Fee treasury delta (transaction): ${event.feeDelta === null ? 'awaiting verification' : `${event.feeDelta} wXMR (${usdEstimate(event.feeDeltaUsd)})`}`);
       if (event.reason) lines.push(`Reason: ${event.reason}`);
-      lines.push('', 'Esc / Enter: back to activity');
+      lines.push('', 'w: filter this wallet + show wallet statistics', 'Esc / Enter: back to activity');
     } else {
       const small = width < 120;
       const ageWidth = width < 100 ? 0 : 10;
@@ -116,12 +117,12 @@ export function terminal(store, options, stop, following = false) {
       }
       if (!lastRows.length) lines.push(color('90', status.pending ? 'Loading bridge activity…' : 'No matching events indexed yet.'));
       while (lines.length < (out.rows || 30) - 4) lines.push('');
-      lines.push(`Page ${page + 1} · ${result.total} matching events · ${type ? TYPES[type].label : 'All events'}${search ? ` · search: ${search}` : ''}`);
+      lines.push(`Page ${page + 1} · ${result.total} matching events · ${type ? TYPES[type].label : 'All events'}${owner ? ` · wallet: ${owner}` : ''}${search ? ` · search: ${search}` : ''}`);
     }
     const coverage = status.historyExhausted && status.eventBackfillComplete && status.feeBackfillComplete && !status.pending && !status.historyGap ? 'RPC history indexed' : 'History indexing; totals cover indexed events';
     lines.push(color('90', `${coverage} · ${status.transactionsScanned} tx scanned · ${status.pending} queued${status.unresolved ? ` · ${status.unresolved} awaiting retry` : ''}`));
     lines.push(status.error ? color('31', status.error) : color('90', `Last sync: ${status.lastSync ? `${new Date(status.lastSync).toLocaleTimeString()} · ${relativeTime(Date.parse(status.lastSync))}` : 'connecting…'}`));
-    lines.push(editing ? `Search: ${search}█  (Enter to apply / Esc to clear)` : color('90', '0 all · 1 create · 2 mint · 3 withdraw · / find · n/p · ↑↓ · Enter · q'));
+    lines.push(editing ? `Search: ${search}█  (Enter to apply / Esc to clear)` : color('90', `0 all · 1 create · 2 mint · 3 withdraw · w wallet${owner ? ' · c clear wallet' : ''} · / find · n/p · ↑↓ · Enter · q`));
     const rendered = details ? lines.flatMap(line => {
       if (line.includes('\x1b')) return [fitLine(line, width)];
       const chars = Array.from(line);
@@ -140,6 +141,18 @@ export function terminal(store, options, stop, following = false) {
       else if (key.name === 'backspace') search = search.slice(0, -1);
       else if (str && !key.ctrl && !key.meta && !/[\x00-\x1f\x7f]/.test(str)) search += str;
       page = 0;
+    } else if (str === 'w' && lastRows[selected]) {
+      owner = lastRows[selected].owner;
+      type = lastRows[selected].type;
+      search = '';
+      page = 0;
+      selected = 0;
+      details = false;
+    } else if (str === 'c' && owner) {
+      owner = '';
+      page = 0;
+      selected = 0;
+      details = false;
     } else if (details) {
       if (key.name === 'escape' || key.name === 'return') details = false;
       if (str === 'q') stop();
@@ -147,7 +160,7 @@ export function terminal(store, options, stop, following = false) {
       if (str === 'q') { stop(); return; }
       if ('0123'.includes(str) && str) { type = { 0: '', 1: 'create', 2: 'mint', 3: 'withdraw' }[str]; page = 0; }
       if (str === '/') { editing = true; search = ''; }
-      if (str === 'n' && (page + 1) * pageSize() < store.list({ type, search, limit: 1 }).total) { page++; selected = 0; }
+      if (str === 'n' && (page + 1) * pageSize() < store.list({ type, owner, search, limit: 1 }).total) { page++; selected = 0; }
       if (str === 'p') { page = Math.max(0, page - 1); selected = 0; }
       if (key.name === 'down') selected = Math.min(lastRows.length - 1, selected + 1);
       if (key.name === 'up') selected = Math.max(0, selected - 1);
@@ -155,16 +168,16 @@ export function terminal(store, options, stop, following = false) {
     }
     render();
   }
-  process.stdin.on('keypress', onKey);
+  input.on('keypress', onKey);
   out.on('resize', render);
   const interval = setInterval(render, 1000);
   render();
   return () => {
     clearInterval(interval);
     out.off('resize', render);
-    process.stdin.off('keypress', onKey);
-    process.stdin.setRawMode(false);
-    process.stdin.pause();
+    input.off('keypress', onKey);
+    input.setRawMode(false);
+    input.pause();
     out.write('\x1b[?25h\x1b[?1049l');
   };
 }

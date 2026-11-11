@@ -25,6 +25,18 @@
     <section class="activity" aria-label="Bridge activity">
       <div class="section-bar"><h2>Activity <span id="count" class="count"></span></h2><span id="sync" class="sync" role="status">Connecting…</span></div>
       <div class="toolbar"><div id="filters" class="tabs" role="group" aria-label="Event type"><button data-type="" class="active" aria-pressed="true">All</button><button data-type="create">Address created</button><button data-type="mint">Mint deposit</button><button data-type="withdraw">Withdraw request</button></div><input id="search" type="search" aria-label="Search wallet, record or transaction" placeholder="Search wallet, record or tx…" autocomplete="off" spellcheck="false"></div>
+      <section id="wallet-summary" class="wallet-summary" aria-label="Selected wallet statistics" hidden>
+        <div class="section-bar"><div><h2>Wallet statistics</h2><a id="wallet-address" class="wallet-address" target="_blank" rel="noreferrer"></a></div><button id="clear-wallet" class="clear-wallet">Clear wallet filter ×</button></div>
+        <div id="wallet-windows" class="tabs" role="group" aria-label="Wallet statistics period"><button data-window="8h">8h</button><button data-window="24h">24h</button><button data-window="7d">7d</button><button data-window="all" class="active" aria-pressed="true">All indexed</button></div>
+        <p id="wallet-loading" role="status">Loading wallet statistics…</p>
+        <div id="wallet-stats" class="stats" hidden>
+          <article><span>Deposits minted · wXMR</span><strong id="wallet-deposited">—</strong><small id="wallet-deposit-count"></small></article>
+          <article><span>Net withdrawals · XMR</span><strong id="wallet-withdrawn">—</strong><small id="wallet-withdraw-count"></small></article>
+          <article><span>Indexed net flow · XMR</span><strong id="wallet-net-flow">—</strong><small id="wallet-activity-count"></small></article>
+          <article><span>Bridge fees · wXMR</span><strong id="wallet-fees">—</strong><small id="wallet-fees-usd"></small><small id="wallet-fee-coverage"></small></article>
+        </div>
+        <p class="note wallet-note">Activity below is filtered to this exact Solana wallet and the selected event type. Wallet statistics cover all event types for the chosen period. Net withdrawals subtract cancellations and reversals; requests do not confirm completed payouts. Fees are treasury receipts for transactions involving this wallet. Totals cover indexed history; USD uses the current cached quote.</p>
+      </section>
       <p id="error" class="error" role="alert" hidden></p>
       <div class="table-wrap"><table><thead><tr><th>Event</th><th>Amount</th><th>Wallet</th><th>Time</th><th>Transaction</th></tr></thead><tbody id="events"><tr><td colspan="5" class="empty">Loading bridge activity…</td></tr></tbody></table></div>
       <div class="pagination"><span id="range"></span><div><button id="previous" disabled>← Newer</button><button id="next" disabled>Older →</button></div></div>

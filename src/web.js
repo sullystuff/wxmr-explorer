@@ -19,6 +19,8 @@ export function web(store, config) {
     };
     if (req.method !== 'GET') { json(405, { error: 'GET only' }); return; }
     const url = new URL(req.url, 'http://localhost');
+    const owner = url.searchParams.get('owner') || '';
+    if (owner.length > 200) { json(400, { error: 'Invalid wallet filter' }); return; }
     if (url.pathname === '/api/events') {
       const type = url.searchParams.get('type') || '';
       const limit = Number(url.searchParams.get('limit') || 50);
@@ -26,8 +28,11 @@ export function web(store, config) {
       if ((type && !ACTIVITY_TYPES.includes(type)) || !Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(offset) || offset < 0) {
         json(400, { error: 'Invalid event filter or page' }); return;
       }
-      json(200, store.list({ type, limit, offset, search: (url.searchParams.get('search') || '').slice(0, 200) }));
-    } else if (url.pathname === '/api/status') json(200, { ...store.status(), stats: store.stats() });
+      json(200, store.list({ type, owner, limit, offset, search: (url.searchParams.get('search') || '').slice(0, 200) }));
+    } else if (url.pathname === '/api/status') json(200, {
+      ...store.status(), stats: store.stats(),
+      ...(owner ? { wallet: { owner, stats: store.stats(Date.now(), { owner }) } } : {}),
+    });
     else if (files.has(url.pathname)) {
       const [contentType, content] = files.get(url.pathname);
       res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' });
