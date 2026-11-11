@@ -10,7 +10,7 @@ The original `DepositCompletedEvent` is also included as a mint deposit. Withdra
 
 ## Terminal — default
 
-Requires **Node.js 22.13+**. No build, web server, wallet connection, or port forwarding is needed.
+Requires **Node.js 22.13+** and **xz** on PATH. No build, web server, wallet connection, or port forwarding is needed.
 
 ```sh
 npm ci
@@ -70,7 +70,9 @@ All amounts use **12 decimal places** (1 XMR = 10¹² atomic units). Atomic amou
 - Time windows use transaction block times. Events without a known block time count only toward all-indexed totals.
 - **Unique users** counts distinct Solana owner wallets with a deposit address creation, minted deposit, or withdrawal request in the period. **Unique depositors** and **unique withdrawers** count wallets with mints and withdrawal requests, respectively. Repeated events from the same wallet count once; a wallet can belong to both groups. Wallet counts do not identify individual people. Accounting-only refunds do not add users or activity events. **Activity events** is the number of address creations, mints, and withdrawal requests, rather than a count of distinct transactions. These counts use the same time windows and indexed-history coverage as volumes and are included in cached stats JSON and `/api/status`.
 
-The explorer starts with the newest transactions and gradually backfills older history. Until backfill finishes, totals cover **indexed events only**. The views show scanned transactions, queued work, and unavailable/undecodable transactions awaiting retry. “RPC history indexed” means all history returned by this endpoint was processed; it cannot establish that the provider retained the bridge's entire lifetime. `sync` is a bounded pass, not a full-history completion guarantee.
+On startup, a missing or empty local database is seeded from the committed `bootstrap/explorer.sqlite.xz` snapshot. This also applies to cached `events`/`stats` commands and custom `DATA_DIR` paths. Existing databases with any queued transactions, events, or fee records are preserved. The snapshot includes history cursors, retry queues, and cached supply/price timestamps; normal indexing resumes from those cursors and refreshes stale values. The live database remains ignored by Git.
+
+The explorer fetches newer transactions and backfills any remaining older history. Until backfill finishes, totals cover **indexed events only**. The views show scanned transactions, queued work, and unavailable/undecodable transactions awaiting retry. “RPC history indexed” means all history returned by this endpoint was processed; it cannot establish that the provider retained the bridge's entire lifetime. `sync` is a bounded pass, not a full-history completion guarantee.
 
 Existing caches upgrade automatically when an indexer starts. The upgrade reprocesses the early history before the first indexed mint and checks the indexed withdrawal PDAs for refund transactions. It retains all existing events and normal history cursors, resumes after interruption, and skips the bulk of unrelated audit traffic. Coverage remains incomplete until the upgrade and its queued work finish. Additional views follow the writer's cached supply and upgrade progress.
 
@@ -94,6 +96,17 @@ PORT=3100
 `.env`, environment variants, local SQLite state, logs, and dependencies are ignored by Git. Only `.env.example` is tracked. The Helius URL is used by Node only; it is never returned by the API or included in browser assets. The public DEX Screener API supplies wXMR/USD quotes without an API key. Provider error bodies are not logged. No signing, transaction submission, Monero wallet access, or bridge backend access is used.
 
 History lives in `data/explorer.sqlite`; it is independent of the bridge's databases. HTTP reads are paced and transaction requests are batched in groups of up to 25. The live signature poll defaults to 15 seconds; historical backfill continues while the process runs and uses Helius credits.
+
+## Refreshing the bootstrap
+
+After syncing the local database, run this local maintenance script with Node and xz on PATH:
+
+```sh
+scripts/update-bootstrap.sh          # Create/update the snapshot locally.
+scripts/update-bootstrap.sh --push   # Also commit the snapshot and git push.
+```
+
+The script reads `.env`/`DATA_DIR`, validates the source database, uses SQLite `VACUUM INTO` for a consistent snapshot (including committed WAL data), and compresses it with `xz -9e`. It replaces the archive only after compression succeeds. Only the archive is included in the script's commit; application changes should be committed separately before using `--push`. No RPC requests are made by this script. Keep `.env`, the live database, and SQLite WAL/SHM files out of Git.
 
 ```sh
 npm test

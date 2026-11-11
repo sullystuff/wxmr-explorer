@@ -46,7 +46,7 @@ async function main() {
   const passes = Number(values.passes);
   if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(passes) || passes < 1 || passes > 10000) throw new Error('Invalid limit or passes');
   const settings = config();
-  const store = new Store(join(settings.dataDir, 'explorer.sqlite'));
+  const store = new Store(join(settings.dataDir, 'explorer.sqlite'), { bootstrap: true });
   let release, rpc, server, cleanup, priceFeed;
   let stopping = false;
   const controller = new AbortController();

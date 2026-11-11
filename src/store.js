@@ -3,9 +3,10 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { PROGRAM_ID, GENESIS_HASH, EVENT_VERSION, FEE_VERSION, FEE_ACCOUNT_ID, ACTIVITY_TYPES, formatAmount } from './config.js';
 import { feesUsd, PRICE_MAX_AGE_MS } from './price.js';
+import { restoreBootstrap } from './bootstrap.js';
 
 export class Store {
-  constructor(path) {
+  constructor(path, { bootstrap = false } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(path);
     this.db.exec(`
@@ -32,6 +33,7 @@ export class Store {
     const identity = `${GENESIS_HASH}:${PROGRAM_ID}`;
     if (this.get('identity') && this.get('identity') !== identity) throw new Error('Cache belongs to another bridge');
     this.set('identity', identity);
+    if (bootstrap && path !== ':memory:') restoreBootstrap(this);
   }
   get(key) {
     const row = this.db.prepare('SELECT value FROM meta WHERE key=?').get(key);
