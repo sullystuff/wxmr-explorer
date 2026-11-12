@@ -112,7 +112,7 @@ export class Indexer {
     const valid = entries.filter(e => !e.failed);
     if (!valid.length) return;
     const transactions = await this.rpc.batch(valid.map(entry => ({ method: 'getTransaction', params: [entry.signature, {
-      commitment: 'finalized', encoding: 'json', maxSupportedTransactionVersion: 0,
+      commitment: 'finalized', encoding: 'json', maxSupportedTransactionVersion: 1,
     }] })));
     for (const [i, entry] of valid.entries()) {
       try {
