@@ -94,6 +94,7 @@ The decoder also supports the bridge's older withdrawal/refund layouts from befo
 
 ```dotenv
 SOLANA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
+# Optional: SOLANA_WS_URL=wss://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
 POLL_INTERVAL_MS=15000
 RPC_INTERVAL_MS=300
 DATA_DIR=./data
@@ -103,7 +104,11 @@ PORT=3100
 
 `.env`, environment variants, local SQLite state, logs, and dependencies are ignored by Git. Only `.env.example` is tracked. The Helius URL is used by Node only; it is never returned by the API or included in browser assets. The public DEX Screener API supplies wXMR/USD quotes without an API key. Provider error bodies are not logged. No signing, transaction submission, Monero wallet access, or bridge backend access is used.
 
-History lives in `data/explorer.sqlite`; it is independent of the bridge's databases. HTTP reads are paced and transaction requests are batched in groups of up to 25. The live signature poll defaults to 15 seconds; historical backfill continues while the process runs and uses Helius credits.
+History lives in `data/explorer.sqlite`; it is independent of the bridge's databases. HTTP reads are paced and transaction requests are batched in groups of up to 25. Live terminal and web indexing use a standard `logsSubscribe` WebSocket subscription filtered to the bridge program at finalized commitment. The WebSocket endpoint defaults to the HTTPS RPC URL with `wss:` in place of `https:`; set `SOLANA_WS_URL` if your provider uses a different endpoint. Only the process holding the cache's writer lock subscribes.
+
+Notifications queue signatures immediately; finalized HTTP transaction reads still supply timestamps, events and actual treasury fees. HTTP history discovery runs at startup, after subscribing/reconnecting, and every five minutes to repair gaps. Notifications never advance the saved history cursor, so out-of-order delivery or a disconnect cannot skip history. Pings detect dead connections, reconnects back off, and unavailable subscriptions fall back to HTTP polling every `POLL_INTERVAL_MS` (15 seconds by default). Bounded `sync` commands use HTTP only. Historical backfill and the separate supply refresh continue using HTTP.
+
+Helius [currently meters](https://www.helius.dev/docs/billing/credits) signature-history reads at 1 credit per call and WebSocket data at 2 credits per 0.1 MB uncompressed; [opening a connection](https://www.helius.dev/docs/rpc/websocket) costs 1 credit. At the default intervals, continuous operation reduces steady-state signature-history checks from about 5,760 to 288 per day, plus the filtered stream and reconnects. This should reduce credits at this bridge's observed traffic (roughly 362 transactions in the cache's latest indexed day); WebSockets are not free, and savings depend on traffic and connection stability. Transaction fetches, supply reads, and historical backfill have their own unchanged costs.
 
 ## Refreshing the bootstrap
 

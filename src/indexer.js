@@ -3,8 +3,8 @@ import { decodeLogs } from './events.js';
 import { feeAccountDelta } from './fees.js';
 
 export class Indexer {
-  constructor(store, rpc, pollMs = 15000) {
-    Object.assign(this, { store, rpc, pollMs });
+  constructor(store, rpc, pollMs = 15000, { subscription = null, reconcileMs = 300000 } = {}) {
+    Object.assign(this, { store, rpc, pollMs, subscription, reconcileMs });
     this.nextPoll = 0;
     this.nextSupplyPoll = 0;
     this.verified = false;
@@ -128,6 +128,15 @@ export class Indexer {
   async tick() {
     try {
       if (!this.verified) await this.verify();
+      if (this.subscription) {
+        this.subscription.start(entry => this.store.enqueue([entry]));
+        // Subscribe before catching up. Never advance the saved head from a
+        // notification: delivery may be out of order or interrupted mid-page.
+        if (this.subscriptionRevision !== this.subscription.revision) {
+          this.subscriptionRevision = this.subscription.revision;
+          this.nextPoll = 0;
+        }
+      }
       this.store.prepareEventBackfill();
       this.store.prepareFeeBackfill();
       if (Date.now() >= this.nextSupplyPoll) {
@@ -136,8 +145,11 @@ export class Indexer {
         this.nextSupplyPoll = Date.now() + this.pollMs;
       }
       if (Date.now() >= this.nextPoll || this.store.get('recentScan')) {
+        const revision = this.subscription?.revision;
         await this.recent();
-        this.nextPoll = Date.now() + this.pollMs;
+        // A reconnect during the HTTP request needs another catch-up pass.
+        this.nextPoll = revision !== this.subscription?.revision ? 0 :
+          Date.now() + (this.subscription?.ready ? this.reconcileMs : this.pollMs);
       }
       await this.process();
       await this.backfill();

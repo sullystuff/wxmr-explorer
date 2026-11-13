@@ -5,6 +5,7 @@ import { config, ACTIVITY_TYPES } from './config.js';
 import { Store } from './store.js';
 import { Rpc } from './rpc.js';
 import { Indexer } from './indexer.js';
+import { SignatureSubscription } from './subscription.js';
 import { acquireLock } from './lock.js';
 import { terminal, printEvents, supplyLine, priceLine, feeLine } from './terminal.js';
 import { web } from './web.js';
@@ -48,12 +49,13 @@ async function main() {
   if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(passes) || passes < 1 || passes > 10000) throw new Error('Invalid limit or passes');
   const settings = config();
   const store = new Store(join(settings.dataDir, 'explorer.sqlite'), { bootstrap: true });
-  let release, rpc, server, cleanup, priceFeed;
+  let release, rpc, server, cleanup, priceFeed, subscription;
   let stopping = false;
   const controller = new AbortController();
   const stop = () => {
     stopping = true;
     controller.abort();
+    subscription?.close();
     rpc?.close();
   };
   try {
@@ -80,8 +82,9 @@ async function main() {
     }
     release = acquireLock(settings.dataDir);
     if (release) rpc = new Rpc(settings.rpcUrl, settings.rpcMs);
+    if (release && command !== 'sync') subscription = new SignatureSubscription(settings.rpcUrl, settings.wsUrl);
     if (release) priceFeed = new PriceFeed(store);
-    const indexer = rpc ? new Indexer(store, rpc, settings.pollMs) : null;
+    const indexer = rpc ? new Indexer(store, rpc, settings.pollMs, { subscription }) : null;
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
     if (command === 'sync') {
@@ -125,6 +128,7 @@ async function main() {
     }
   } finally {
     cleanup?.();
+    subscription?.close();
     if (server) await new Promise(resolve => server.close(resolve));
     rpc?.close();
     await priceFeed?.close();

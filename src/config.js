@@ -23,6 +23,7 @@ export function config(env = process.env) {
   };
   return {
     rpcUrl: env.SOLANA_RPC_URL,
+    wsUrl: env.SOLANA_WS_URL,
     dataDir: resolve(env.DATA_DIR || './data'),
     pollMs: integer('POLL_INTERVAL_MS', 15000, 1000, 3600000),
     rpcMs: integer('RPC_INTERVAL_MS', 300, 100, 60000),

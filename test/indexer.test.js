@@ -2,8 +2,102 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../src/store.js';
 import { Indexer } from '../src/indexer.js';
-import { GENESIS_HASH, MINT_ID, FEE_ACCOUNT_ID } from '../src/config.js';
+import { GENESIS_HASH, MINT_ID, FEE_ACCOUNT_ID, EVENT_VERSION, FEE_VERSION } from '../src/config.js';
 import { entry, transaction, event, pda, owner, u64, string, logs } from './helpers.js';
+
+function liveFixture(t) {
+  t.mock.timers.enable({ apis: ['Date'], now: 1700000000000 });
+  const store = new Store(':memory:');
+  t.after(() => store.close());
+  store.set('head', 'old-head');
+  store.set('backfill', { before: 'old-head', exhausted: true });
+  store.set('eventVersion', EVENT_VERSION);
+  store.set('feeVersion', FEE_VERSION);
+  const subscription = { ready: true, revision: 1, start(fn) { this.notify = fn; } };
+  const pages = [], discovered = [], fetched = [];
+  const rpc = {
+    call: async (method, params) => {
+      if (method === 'getTokenSupply') return { context: { slot: 1 }, value: { amount: '1000', decimals: 12 } };
+      assert.equal(method, 'getSignaturesForAddress');
+      discovered.push(params);
+      return pages.shift() ?? [entry('old-head', 1)];
+    },
+    batch: async requests => requests.map(request => {
+      assert.equal(request.method, 'getTransaction');
+      assert.equal(request.params[1].commitment, 'finalized');
+      assert.equal(request.params[1].maxSupportedTransactionVersion, 1);
+      const signature = request.params[0];
+      fetched.push(signature);
+      const row = store.db.prepare('SELECT slot FROM queue WHERE signature=?').get(signature);
+      return transaction(entry(signature, row.slot));
+    }),
+  };
+  const indexer = new Indexer(store, rpc, 15000, { subscription });
+  indexer.verified = true;
+  return { store, subscription, indexer, pages, discovered, fetched };
+}
+
+test('healthy subscriptions replace idle signature polls with five-minute reconciliation and fall back on disconnect', async t => {
+  const { subscription, indexer, discovered } = liveFixture(t);
+  await indexer.tick();
+  assert.equal(discovered.length, 1);
+  t.mock.timers.tick(15000);
+  await indexer.tick();
+  assert.equal(discovered.length, 1, 'idle HTTP signature polling is suspended');
+  t.mock.timers.tick(285000);
+  await indexer.tick();
+  assert.equal(discovered.length, 2, 'periodic history repair still runs');
+  subscription.ready = false;
+  subscription.revision++;
+  await indexer.tick();
+  assert.equal(discovered.length, 3, 'disconnect immediately resumes HTTP discovery');
+  t.mock.timers.tick(15000);
+  await indexer.tick();
+  assert.equal(discovered.length, 4);
+  subscription.ready = true;
+  subscription.revision++;
+  await indexer.tick();
+  assert.equal(discovered.length, 5, 'acknowledged reconnect forces catch-up');
+  t.mock.timers.tick(15000);
+  await indexer.tick();
+  assert.equal(discovered.length, 5);
+});
+
+test('duplicate and out-of-order notifications preserve the head while reconnect recovery fills all history pages', async t => {
+  const { store, subscription, indexer, pages, discovered, fetched } = liveFixture(t);
+  await indexer.tick();
+  subscription.notify(entry('newest', 4));
+  subscription.notify(entry('earlier', 2));
+  subscription.notify(entry('newest', 4));
+  assert.equal(store.pendingCount(), 2);
+  await indexer.tick();
+  assert.deepEqual(fetched, ['newest', 'earlier']);
+  assert.equal(discovered.length, 1, 'notifications do not require a history request');
+  assert.equal(store.get('head'), 'old-head', 'notifications cannot skip an unseen transaction');
+  subscription.revision += 2;
+  pages.push([entry('newest', 4), entry('missed', 3)], [entry('earlier', 2), entry('old-head', 1)]);
+  await indexer.tick();
+  assert.equal(store.get('head'), 'old-head');
+  assert.equal(store.get('recentScan').stop, 'old-head');
+  await indexer.tick();
+  assert.equal(discovered.at(-1)[1].before, 'missed');
+  assert.equal(store.get('head'), 'newest');
+  assert.equal(store.get('recentScan'), null);
+  assert.deepEqual(fetched, ['newest', 'earlier', 'missed'], 'already processed notifications are not fetched twice');
+  assert.equal(store.list().total, 3);
+  assert.ok(store.list().events.every(event => event.blockTime === 1700000000), 'HTTP transaction timestamps populate notification-discovered events');
+  assert.equal(store.pendingCount(), 0);
+});
+
+test('a subscription reconnect during HTTP discovery forces another catch-up pass', async t => {
+  const { subscription, indexer, discovered } = liveFixture(t);
+  const recent = indexer.recent.bind(indexer);
+  indexer.recent = async () => { await recent(); subscription.revision++; };
+  await indexer.tick();
+  indexer.recent = recent;
+  await indexer.tick();
+  assert.equal(discovered.length, 2);
+});
 
 test('unavailable transaction stays queued while later events are indexed', async () => {
   const store = new Store(':memory:');

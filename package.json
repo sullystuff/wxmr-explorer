@@ -12,5 +12,8 @@
     "events": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/cli.js events",
     "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
   },
-  "dependencies": { "bs58": "6.0.0" }
+  "dependencies": {
+    "bs58": "6.0.0",
+    "ws": "8.23.0"
+  }
 }
